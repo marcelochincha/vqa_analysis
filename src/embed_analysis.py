@@ -156,21 +156,29 @@ def reduce_and_plot_umap_by_block(embeddings, df: pd.DataFrame) -> None:
     print("\n=== UMAP by Block and Sector ===")
     
     for block in sorted(df["BLOCK"].unique()):
-        for sector in ['Lima', 'NYC']:
-            mask = (df["BLOCK"] == block) & (df["VIDEO_SECTOR"] == sector)
-            embeddings_subset = embeddings[mask]
-            df_subset = df[mask]
-            
-            print(f"Block {block} - {sector}: {len(df_subset)} samples")
-            
-            if len(df_subset) < 2:
-                print(f"  Skipping (insufficient data)")
-                continue
+        # Fit UMAP once per block with ALL videos (Lima + NYC)
+        block_mask = df["BLOCK"] == block
+        embeddings_block = embeddings[block_mask]
+        df_block = df[block_mask]
         
-            # Apply UMAP
-            n_neighbors = min(15, len(df_subset)-1)
-            reducer = UMAP(n_components=2, random_state=42, n_neighbors=n_neighbors, min_dist=0.1)
-            embeddings_2d = reducer.fit_transform(embeddings_subset)
+        print(f"Block {block}: Fitting UMAP with {len(df_block)} total samples")
+        
+        # Apply UMAP to entire block
+        n_neighbors = min(15, len(df_block)-1)
+        reducer = UMAP(n_components=2, random_state=42, n_neighbors=n_neighbors, min_dist=0.1)
+        embeddings_2d_block = reducer.fit_transform(embeddings_block)
+        
+        # Now plot each sector separately in the same embedding space
+        for sector in ['Lima', 'NYC']:
+            sector_mask = df_block["VIDEO_SECTOR"] == sector
+            embeddings_2d = embeddings_2d_block[sector_mask]
+            df_subset = df_block[sector_mask]
+            
+            print(f"  {sector}: {len(df_subset)} samples")
+            
+            if len(df_subset) < 1:
+                print(f"    Skipping (no data)")
+                continue
             
             # Plot with individual agent colors and markers
             fig, ax = plt.subplots(figsize=(14, 10))
@@ -336,21 +344,29 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
     print("\n=== PCA by Block and Sector ===")
     
     for block in sorted(df["BLOCK"].unique()):
+        # Fit PCA once per block with ALL videos (Lima + NYC)
+        block_mask = df["BLOCK"] == block
+        embeddings_block = embeddings[block_mask]
+        df_block = df[block_mask]
+        
+        print(f"Block {block}: Fitting PCA with {len(df_block)} total samples")
+        
+        # Apply PCA to entire block
+        pca = PCA(n_components=2, random_state=42)
+        embeddings_2d_block = pca.fit_transform(embeddings_block)
+        variance = pca.explained_variance_ratio_
+        
+        # Now plot each sector separately in the same embedding space
         for sector in ['Lima', 'NYC']:
-            mask = (df["BLOCK"] == block) & (df["VIDEO_SECTOR"] == sector)
-            embeddings_subset = embeddings[mask]
-            df_subset = df[mask]
+            sector_mask = df_block["VIDEO_SECTOR"] == sector
+            embeddings_2d = embeddings_2d_block[sector_mask]
+            df_subset = df_block[sector_mask]
             
-            print(f"Block {block} - {sector}: {len(df_subset)} samples")
+            print(f"  {sector}: {len(df_subset)} samples")
             
-            if len(df_subset) < 2:
-                print(f"  Skipping (insufficient data)")
+            if len(df_subset) < 1:
+                print(f"    Skipping (no data)")
                 continue
-            
-            # Apply PCA
-            pca = PCA(n_components=2, random_state=42)
-            embeddings_2d = pca.fit_transform(embeddings_subset)
-            variance = pca.explained_variance_ratio_
             
             # Plot with individual agent colors and markers
             fig, ax = plt.subplots(figsize=(14, 10))
