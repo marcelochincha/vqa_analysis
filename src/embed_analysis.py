@@ -2,6 +2,8 @@
 import os
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg') # Use non-interactive backend for plotting
 import matplotlib.pyplot as plt
 from sentence_transformers import SentenceTransformer
 from sklearn.decomposition import PCA
@@ -41,6 +43,8 @@ def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     # Generate embeddings (EXPENSIVE!)
     print(f"⚠ Encoding {len(answers)} answers... (this may take time)")
     embeddings = model.encode(answers, show_progress_bar=True, batch_size=32)
+
+    
     print(f"✓ Generated embeddings of shape {embeddings.shape}")
     
     # Save to cache if enabled
@@ -179,7 +183,7 @@ def main(use_cache: bool = True):
     embeddings, df = generate_embeddings(df, use_cache=use_cache)
     
     # UMAP visualization
-    reduce_and_plot_umap(embeddings, df)
+    #reduce_and_plot_umap(embeddings, df)
     
     # PCA visualizations
     reduce_and_plot_pca(embeddings, df)
