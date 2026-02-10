@@ -66,13 +66,43 @@ VLM_AGENTS = [
     "VideoLLaMA3-7B"
 ]
 
-# Color scheme for agent types
-AGENT_COLORS = {
-    "lima": "#2E86AB",      # Blue
-    "nyc": "#06A77D",       # Green
-    "vlm": "#D62828"        # Red/Orange
-}
+# Color scheme: VLMs = orange/red tones, Lima = light blues, NYC = dark blues
+VLM_COLORS = [
+    "#FF6B35",
+]
+
+LIMA_COLORS = [
+    "#4A90E2",
+]
+
+NYC_COLORS = [
+    "#1E3A8A"
+]
+
+# Individual agent color mapping
+AGENT_COLORS_MAP = {}
+for i, agent in enumerate(VLM_AGENTS):
+    AGENT_COLORS_MAP[agent] = VLM_COLORS[i % len(VLM_COLORS)]
+for i, agent in enumerate(LIMA_AGENTS):
+    AGENT_COLORS_MAP[agent] = LIMA_COLORS[i % len(LIMA_COLORS)]
+for i, agent in enumerate(NYC_AGENTS):
+    AGENT_COLORS_MAP[agent] = NYC_COLORS[i % len(NYC_COLORS)]
+
+# Individual agent marker mapping
+VLM_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
+LIMA_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
+NYC_MARKERS = ["o", "s"]
+
+AGENT_MARKERS_MAP = {}
+for i, agent in enumerate(VLM_AGENTS):
+    AGENT_MARKERS_MAP[agent] = VLM_MARKERS[i % len(VLM_MARKERS)]
+for i, agent in enumerate(LIMA_AGENTS):
+    AGENT_MARKERS_MAP[agent] = LIMA_MARKERS[i % len(LIMA_MARKERS)]
+for i, agent in enumerate(NYC_AGENTS):
+    AGENT_MARKERS_MAP[agent] = NYC_MARKERS[i % len(NYC_MARKERS)]
 
 # Block configuration (5 questions per block)
 QUESTIONS_PER_BLOCK = 5
 NUM_BLOCKS = 4
+
+LEYEND_SIZE = 12

@@ -49,12 +49,8 @@ def get_agent_groups() -> Dict[str, List[str]]:
 
 def get_agent_color(agent_name: str) -> str:
     """Get color for an agent based on its type."""
-    if agent_name in config.LIMA_AGENTS:
-        return config.AGENT_COLORS["lima"]
-    elif agent_name in config.NYC_AGENTS:
-        return config.AGENT_COLORS["nyc"]
-    elif agent_name in config.VLM_AGENTS:
-        return config.AGENT_COLORS["vlm"]
+    if agent_name in config.AGENT_COLORS_MAP:
+        return config.AGENT_COLORS_MAP[agent_name]
     return "#999999"  # Default gray
 
 
