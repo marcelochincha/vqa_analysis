@@ -183,6 +183,7 @@ def main():
     """Main execution: compute scores if needed, then generate heatmaps."""
     print("=" * 60)
     print("SMATCH SCORE HEATMAP ANALYSIS (AMR-based)")
+    print("IF RUNNING FOR THE FIRST TIME, MAKE SURE TO ")
     print("=" * 60)
     
     # Check if scores exist

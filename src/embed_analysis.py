@@ -9,6 +9,8 @@ from umap import UMAP
 from src import config, utils
 
 
+EMBED_MODEL = "Qwen/Qwen3-Embedding-8B"
+EMBED_MODEL_SMALL = "all-MiniLM-L6-v2"  # For testing or smaller datasets
 def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     """
     Generate sentence embeddings for all answers.
@@ -30,7 +32,7 @@ def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     
     # Load sentence transformer model
     print("Loading sentence transformer model...")
-    model = SentenceTransformer('all-MiniLM-L6-v2')
+    model = SentenceTransformer(EMBED_MODEL)
     print("✓ Model loaded")
     
     # Get answers as list
@@ -152,7 +154,7 @@ def reduce_and_plot_pca(embeddings, df: pd.DataFrame) -> None:
     print(f"✓ Saved: {os.path.basename(output_path)}")
 
 
-def main(use_cache: bool = False):
+def main(use_cache: bool = True):
     """
     Main execution: generate embeddings and visualizations.
     

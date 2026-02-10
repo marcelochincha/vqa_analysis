@@ -42,19 +42,17 @@ Run scripts from the workspace root:
 
 ```powershell
 # Embedding analysis
-python src/embed_analysis.py
+python -m src.embed_analysis
 
 # Bias analysis
-python src/bias_analysis.py
+python -m src.bias_analysis
 
 # SMATCH metric
-python src/heatmap_smatch.py
+python -m src.heatmap_smatch
 
 # STSB-RoBERTa metric
-python src/heatmap_stsb.py
+python -m src.heatmap_stsb
 
-# Run all analyses
-python src/run_all.py
 ```
 
 Outputs are saved in the `outputs/` folder, organized by metric.
@@ -67,11 +65,4 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-For SMATCH/AMR parsing:
-
-```powershell
-python -m amrlib.download model_parse_xfm_bart_large
-```
-
----
-Edit `src/config.py` to adjust paths, agent groups, or plotting parameters as needed.# VQA analysis
+Make sure to install the STOG model from amrlib (Check the amrlib documentation for installation instructions).
