@@ -11,8 +11,10 @@ from umap import UMAP
 from src import config, utils
 
 
-EMBED_MODEL = "Qwen/Qwen3-Embedding-8B"
+EMBED_MODEL = "Qwen/Qwen3-Embedding-4B"
 EMBED_MODEL_SMALL = "all-MiniLM-L6-v2"  # For testing or smaller datasets
+BATCH_SIZE = 64  # Adjust based on your GPU/CPU capabilities
+
 def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     """
     Generate sentence embeddings for all answers.
@@ -34,7 +36,11 @@ def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     
     # Load sentence transformer model
     print("Loading sentence transformer model...")
-    model = SentenceTransformer(EMBED_MODEL)
+    model = SentenceTransformer(
+        EMBED_MODEL,
+        model_kwargs={"attn_implementation": "flash_attention_2", "device_map": "auto", "torch_dtype": "bfloat16"},
+        tokenizer_kwargs={"padding_side": "left"},
+    )
     print("✓ Model loaded")
     
     # Get answers as list
@@ -42,9 +48,7 @@ def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     
     # Generate embeddings (EXPENSIVE!)
     print(f"⚠ Encoding {len(answers)} answers... (this may take time)")
-    embeddings = model.encode(answers, show_progress_bar=True, batch_size=32)
-
-    
+    embeddings = model.encode(answers, show_progress_bar=True, batch_size=BATCH_SIZE)
     print(f"✓ Generated embeddings of shape {embeddings.shape}")
     
     # Save to cache if enabled
