@@ -1,85 +1,10 @@
-def plot_all_heatmaps_grid(output_dir: str):
-    """
-    Create a 4x5 grid plot of all heatmaps.
-    X axis: Questions Q6-Q10
-    Y axis: Human × Video origin combinations
-    Each cell: corresponding heatmap
-    """
-    import matplotlib.image as mpimg
-    from matplotlib import pyplot as plt
-    import numpy as np
-
-    combinations = [
-        ("lima", "lima"),   # Lima humans, Lima videos (1-100)
-        ("lima", "nyc"),    # Lima humans, NYC videos (101-200)
-        ("nyc", "lima"),    # NYC humans, Lima videos (1-100)
-        ("nyc", "nyc")      # NYC humans, NYC videos (101-200)
-    ]
-    questions = [6, 7, 8, 9, 10]
-
-    fig, axes = plt.subplots(4, 5, figsize=(40, 32), dpi=400)
-    for row, (human_region, video_region) in enumerate(combinations):
-        for col, q in enumerate(questions):
-            ax = axes[row, col]
-            fname = f"bias_heatmap_H{human_region}_V{video_region}_Q{q}.png"
-            fpath = os.path.join(output_dir, fname)
-            if os.path.exists(fpath):
-                img = mpimg.imread(fpath)
-                ax.imshow(img, aspect='auto')
-                ax.axis('off')
-            else:
-                ax.text(0.5, 0.5, 'Missing', ha='center', va='center', fontsize=32, color='red')
-                ax.axis('off')
-            if row == 0:
-                ax.set_title(f"Q{q}", fontsize=36, fontweight="bold", pad=20)
-            if col == 0:
-                label = f"{human_region.upper()} H × {video_region.upper()} V"
-                ax.set_ylabel(label, fontsize=32, fontweight="bold", labelpad=20)
-    plt.subplots_adjust(left=0.04, right=0.98, top=0.95, bottom=0.05, wspace=0.08, hspace=0.08)
-    grid_path = os.path.join(output_dir, "bias_heatmap_grid_all.png")
-    plt.savefig(grid_path, dpi=400, bbox_inches="tight")
-    plt.close()
-    print(f"✓ Saved unified grid heatmap: {os.path.basename(grid_path)}")
-def combine_heatmaps_to_single_png(question_num: int, output_dir: str):
-    """
-    Combine Lima and NYC heatmaps for a question into a single .png file.
-    Assumes individual heatmaps are already saved as .png files.
-    """
-    import matplotlib.image as mpimg
-    from matplotlib import pyplot as plt
-    import numpy as np
-
-    # Paths for individual heatmaps
-    lima_path = os.path.join(output_dir, f"bias_heatmap_Hlima_Vlima_Q{question_num}.png")
-    nyc_path = os.path.join(output_dir, f"bias_heatmap_Hnyc_Vnyc_Q{question_num}.png")
-
-    # Check if both files exist
-    if not (os.path.exists(lima_path) and os.path.exists(nyc_path)):
-        print(f"  ⚠ Cannot combine: missing heatmap(s) for Q{question_num}")
-        return
-
-    # Load images
-    img_lima = mpimg.imread(lima_path)
-    img_nyc = mpimg.imread(nyc_path)
-
-    # Combine vertically
-    combined_img = np.vstack([img_lima, img_nyc])
-
-    # Plot and save
-    fig, ax = plt.subplots(figsize=(16, 16))
-    ax.imshow(combined_img)
-    ax.axis('off')
-    plt.tight_layout()
-    combined_path = os.path.join(output_dir, f"bias_heatmap_combined_Q{question_num}.png")
-    plt.savefig(combined_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"✓ Saved combined heatmap: {os.path.basename(combined_path)}")
 """Bias analysis comparing VLM ratings against human ratings by region.
 
 Focus: Block 2 (Q6-Q10) which contains numerical ratings.
 Method: Unit consensus - compare each VLM against each human individually,
         get sign (+1, -1, 0), then average signs.
 """
+
 import os
 import re
 import numpy as np
@@ -156,7 +81,7 @@ def compute_unit_consensus_bias(df: pd.DataFrame, human_region: str = "lima", vi
     
     Args:
         human_region: "lima" or "nyc" (which human annotators)
-        video_region: "lima" or "nyc" (which video set: 1-100 or 101-200)
+        video_region: "lima" or "nyc" or "both" (which video set: 1-100 or 101-200)
     
     Returns:
         DataFrame with columns: VIDEO, QUESTION_NUM, AGENT (VLM), avg_bias_sign
@@ -172,7 +97,12 @@ def compute_unit_consensus_bias(df: pd.DataFrame, human_region: str = "lima", vi
         raise ValueError("human_region must be 'lima' or 'nyc'")
     
     # Filter videos by region
-    df = df[df["video_region"] == video_region].copy()
+    #video region can be both
+    if video_region not in ["lima", "nyc", "both"]:
+        raise ValueError("video_region must be 'lima', 'nyc', or 'both'")
+
+    if video_region != "both":
+        df = df[df["video_region"] == video_region].copy()
     
     if len(df) == 0:
         print(f"  ⚠ No videos found for region: {video_region}")
@@ -228,22 +158,14 @@ def compute_unit_consensus_bias(df: pd.DataFrame, human_region: str = "lima", vi
     
     return result_df
 
-
 def get_region_colormap(region: str):
-    """Get colormap for region: Lima=white→red, NYC=white→blue."""
-    if region in ["lima"]:
-        # White to Red
-        colors = ["white", "#ff6b6b", "#ee0000"]
-        return LinearSegmentedColormap.from_list("lima_cmap", colors, N=256)
-    elif region == "nyc":
-        # White to Blue
-        colors = ["white", "#4dabf7", "#0066cc"]
-        return LinearSegmentedColormap.from_list("nyc_cmap", colors, N=256)
-    else:
-        # No colormap for other groups
-        return None
-
-
+    # grayscale for everyone
+    #use config plot colors for video regions
+    return LinearSegmentedColormap.from_list(
+        f"olormap",
+        [config.PLOT_COLORS["BASE"], config.PLOT_COLORS["OTHER"]],
+    )
+    
 def plot_bias_heatmap_per_question(bias_df: pd.DataFrame, human_region: str, video_region: str, question_num: int, output_dir: str) -> None:
     """
     Plot single heatmap for one question: VLMs (Y) vs Videos (X).
@@ -269,153 +191,97 @@ def plot_bias_heatmap_per_question(bias_df: pd.DataFrame, human_region: str, vid
         values="avg_bias_sign",
         aggfunc="mean"
     )
+    cmap = get_region_colormap(video_region)
+    #get n columns
     
     # Keep consistent VLM order across all plots (alphabetical)
     vlm_order = sorted(heatmap_data.index)
     heatmap_data = heatmap_data.loc[vlm_order]
+    row_means = heatmap_data.mean(axis=1).to_frame(name="Mean")
     
     # Adjust figure width based on number of videos
     num_videos = len(heatmap_data.columns)
+    proportional_width = [1, num_videos]
     fig_width = max(10, min(20, num_videos * 0.8))
-    fig, ax = plt.subplots(figsize=(fig_width, 8))
+    fig, (ax_avg,ax_main) = plt.subplots(1,2, figsize=(fig_width, 8), sharey=True, gridspec_kw={'width_ratios': proportional_width})
     
-    cmap = get_region_colormap(video_region)
+    # move the labels to the right of the heatmap
+    sns.heatmap(
+        row_means,
+        ax=ax_avg,
+        cmap=cmap,
+        vmin=-1,
+        vmax=1,
+        annot=True,
+        fmt=".2f",
+        linewidths=0.5,
+        yticklabels=True,
+        cbar=False,
+        linecolor="gray"
+    )
     
+    #put labels to the right of the heatmap
+    ax_avg.tick_params(left=False, labelleft=False)
+    ax_avg.tick_params(right=True, labelright=True)
+    # set rotation of labels to 0
+    ax_avg.set_yticklabels(ax_avg.get_yticklabels(), rotation=0, fontsize=10)
+    
+
+
     sns.heatmap(
         heatmap_data,
+        ax=ax_main,
         cmap=cmap,
         center=0,
         vmin=-1,
         vmax=1,
         annot=True,
         fmt=".2f",
-        square=True,
+        yticklabels=True,
+        square=False,
         linewidths=0.5,
         cbar_kws={
             "label": "Avg Bias Sign\n(-1=underestimate, +1=overestimate)",
-            "shrink": 0.8
+            "shrink": 1
         },
-        linecolor="black",
-        ax=ax
+        linecolor="gray"
     )
-    
+    ax_main.set_ylabel("VLM Agent", fontsize=12)
+        
     human_label = "Lima" if human_region == "lima" else "NYC"
-    video_label = "Lima (1-100)" if video_region == "lima" else "NYC (101-200)"
-    ax.set_title(
-        f"Q{question_num}: VLM Bias vs {human_label} Humans | {video_label} Videos\n"
-        f"White→{'Red' if human_region == 'lima' else 'Blue'}: Overestimation intensity",
-        fontsize=14,
-        fontweight="bold",
-        pad=15
+    ax_main.set_title(
+        f"Q{question_num} - VLM vs {human_label} Humans: Rating bias \n",
+        fontsize=config.PLOT_CONFIG["title_fontsize"],
+        pad=-30,
+        fontweight='bold',
+        
     )
-    ax.set_xlabel("Video", fontsize=12)
-    ax.set_ylabel("VLM Agent", fontsize=12)
+    ax_main.set_xlabel("Video", fontsize=12)
+    ax_main.set_ylabel("", fontsize=12)
     
     plt.xticks(rotation=45, ha="right", fontsize=8)
-    plt.tight_layout()
+    
+    #q: what doses tight layout does? explain it in 3 bullet points
+    #r1: Automatically adjusts subplot parameters to give specified padding
+    #r2: Prevents overlap of subplot elements (titles, labels, ticks)
+    #r3: Ensures the entire figure fits within the specified figure size without clipping
+    
+    #q: why does it changes the title size
+    #r: tight_layout can sometimes adjust the spacing in a way that affects the title size or position. If you want to maintain a specific title size, you can set it after calling tight_layout or adjust the layout parameters to prevent it from resizing the title.
+    
+    #plt.tight_layout()
     
     output_path = os.path.join(output_dir, f"bias_heatmap_H{human_region}_V{video_region}_Q{question_num}.png")
+    plt.tight_layout(pad=-2.5)
     utils.ensure_output_dir(output_dir)
     plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
     plt.close()
     
     print(f"✓ Saved: {os.path.basename(output_path)}")
 
-
-def plot_bias_distributions(bias_df: pd.DataFrame, region: str, output_dir: str) -> None:
-    """
-    Plot distribution charts to show bias patterns not visible in heatmaps.
-    
-    Creates:
-    1. Violin plot: Distribution of bias signs per VLM across all Q6-Q10
-    2. Bar plot: Average bias per VLM per question
-    """
-    print(f"\n=== Plotting Bias Distributions ({region.upper()}) ===")
-    
-    # 1. Violin plot: Overall distribution per VLM
-    fig, ax = plt.subplots(figsize=(14, 8))
-    
-    # Keep consistent VLM order (alphabetical)
-    vlm_order = sorted(bias_df["AGENT"].unique())
-    
-    sns.violinplot(
-        data=bias_df,
-        x="avg_bias_sign",
-        y="AGENT",
-        order=vlm_order,
-        palette="Set2",
-        ax=ax
-    )
-    
-    ax.axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    region_label = region.replace("_H_x_", " Humans × ").replace("_V", " Videos").replace("lima", "Lima").replace("nyc", "NYC")
-    ax.set_title(
-        f"VLM Bias Distribution: {region_label} (Q6-Q10)\\n"
-        f"Unit Consensus Method",
-        fontsize=14,
-        fontweight="bold",
-        pad=15
-    )
-    ax.set_xlabel("Avg Bias Sign (-1 to +1)", fontsize=12)
-    ax.set_ylabel("VLM Agent", fontsize=12)
-    ax.set_xlim(-1.1, 1.1)
-    
-    plt.tight_layout()
-    
-    output_path = os.path.join(output_dir, f"bias_distribution_{region}_overall.png")
-    plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
-    plt.close()
-    
-    print(f"✓ Saved: {os.path.basename(output_path)}")
-    
-    # 2. Bar plot: Average bias per VLM per question
-    fig, ax = plt.subplots(figsize=(14, 8))
-    
-    # Compute mean bias per VLM per question
-    mean_bias = bias_df.groupby(["AGENT", "QUESTION_NUM"])["avg_bias_sign"].mean().reset_index()
-    mean_bias_pivot = mean_bias.pivot(index="AGENT", columns="QUESTION_NUM", values="avg_bias_sign")
-    #Keep consistent VLM order (alphabetical)
-    vlm_order = sorted(mean_bias_pivot.index)
-    vlm_order = mean_bias_pivot.mean(axis=1).sort_values().index
-    mean_bias_pivot = mean_bias_pivot.loc[vlm_order]
-    
-    # Plot grouped bar chart
-    x = np.arange(len(mean_bias_pivot))
-    width = 0.15
-    questions = sorted(mean_bias["QUESTION_NUM"].unique())
-    
-    for i, q in enumerate(questions):
-        offset = width * (i - len(questions)/2 + 0.5)
-        values = mean_bias_pivot[q].values
-        ax.barh(x + offset, values, width, label=f"Q{q}")
-    
-    ax.axvline(0, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    ax.set_yticks(x)
-    ax.set_yticklabels(mean_bias_pivot.index)
-    ax.set_xlabel("Avg Bias Sign", fontsize=12)
-    ax.set_ylabel("VLM Agent", fontsize=12)
-    region_label = region.replace("_H_x_", " Humans × ").replace("_V", " Videos").replace("lima", "Lima").replace("nyc", "NYC")
-    ax.set_title(
-        f"Average Bias per Question: {region_label}",
-        fontsize=14,
-        fontweight="bold",
-        pad=15
-    )
-    ax.legend(title="Question", loc="best")
-    ax.set_xlim(-1.1, 1.1)
-    
-    plt.tight_layout()
-    
-    output_path = os.path.join(output_dir, f"bias_distribution_{region}_per_question.png")
-    plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
-    plt.close()
-    
-    print(f"✓ Saved: {os.path.basename(output_path)}")
-
-
 def main():
     # After all individual plots, create unified grid
-    plot_all_heatmaps_grid(config.OUTPUT_BIAS_DIR)
+    #plot_all_heatmaps_grid(config.OUTPUT_BIAS_DIR)
     """
     Main execution: compute and visualize bias analysis.
     
@@ -443,58 +309,77 @@ def main():
     print(f"  Videos: {df_ratings['VIDEO'].nunique()}")
     print(f"  Questions: {sorted(df_ratings['QUESTION_NUM'].unique())}")
     
-    # Analyze by 4 combinations: human region × video region
-    combinations = [
-        ("lima", "lima"),   # Lima humans, Lima videos (1-100)
-        ("lima", "nyc"),    # Lima humans, NYC videos (101-200)
-        ("nyc", "lima"),    # NYC humans, Lima videos (1-100)
-        ("nyc", "nyc")      # NYC humans, NYC videos (101-200)
-    ]
     
-    for human_region, video_region in combinations:
-        print("\n" + "=" * 60)
-        print(f"Processing: {human_region.upper()} Humans × {video_region.upper()} Videos")
-        print("=" * 60)
-        
-        # Compute unit consensus bias
-        bias_df = compute_unit_consensus_bias(df_ratings, human_region=human_region, video_region=video_region)
-        
-        if len(bias_df) == 0:
-            print(f"  ⚠ No data for this combination")
-            continue
-        
-        # Generate heatmap for each question (Q6-Q10)
-        print(f"\n=== Generating Heatmaps (H:{human_region.upper()}, V:{video_region.upper()}) ===")
-        for q in [6, 7, 8, 9, 10]:
-            plot_bias_heatmap_per_question(
-                bias_df, 
-                human_region=human_region,
-                video_region=video_region,
-                question_num=q, 
-                output_dir=config.OUTPUT_BIAS_DIR
-            )
-        
-        # Generate distribution plots per combination
-        plot_bias_distributions(
+    bias_df = compute_unit_consensus_bias(df_ratings, human_region="lima", video_region="both")
+    for q in [6, 7, 8, 9, 10]:
+        plot_bias_heatmap_per_question(
             bias_df, 
-            region=f"{human_region}_H_x_{video_region}_V", 
+            human_region="lima",
+            video_region="both",
+            question_num=q, 
             output_dir=config.OUTPUT_BIAS_DIR
         )
+    bias_df = compute_unit_consensus_bias(df_ratings, human_region="nyc", video_region="both")
+    for q in [6, 7, 8, 9, 10]:
+        plot_bias_heatmap_per_question(
+            bias_df, 
+            human_region="nyc",
+            video_region="both",
+            question_num=q, 
+            output_dir=config.OUTPUT_BIAS_DIR
+        )
+    
+    
+    # # Analyze by 4 combinations: human region × video region
+    # combinations = [
+    #     ("lima", "lima"),   # Lima humans, Lima videos (1-100)
+    #     ("nyc", "nyc")      # NYC humans, NYC videos (101-200)
+    # ]
+    
+    # for human_region, video_region in combinations:
+    #     print("\n" + "=" * 60)
+    #     print(f"Processing: {human_region.upper()} Humans × {video_region.upper()} Videos")
+    #     print("=" * 60)
+        
+    #     # Compute unit consensus bias
+    #     bias_df = compute_unit_consensus_bias(df_ratings, human_region=human_region, video_region=video_region)
+        
+    #     if len(bias_df) == 0:
+    #         print(f"  ⚠ No data for this combination")
+    #         continue
+        
+    #     # Generate heatmap for each question (Q6-Q10)
+    #     print(f"\n=== Generating Heatmaps (H:{human_region.upper()}, V:{video_region.upper()}) ===")
+    #     for q in [6, 7, 8, 9, 10]:
+    #         plot_bias_heatmap_per_question(
+    #             bias_df, 
+    #             human_region=human_region,
+    #             video_region=video_region,
+    #             question_num=q, 
+    #             output_dir=config.OUTPUT_BIAS_DIR
+    #         )
+        
+        # Generate distribution plots per combination
+        #plot_bias_distributions(
+        #    bias_df, 
+        #    region=f"{human_region}_H_x_{video_region}_V", 
+        #    output_dir=config.OUTPUT_BIAS_DIR
+        #)
 
     # Combine Lima and NYC heatmaps for each question
-    for q in [6, 7, 8, 9, 10]:
-        combine_heatmaps_to_single_png(q, config.OUTPUT_BIAS_DIR)
+    #for q in [6, 7, 8, 9, 10]:
+    #    combine_heatmaps_to_single_png(q, config.OUTPUT_BIAS_DIR)
     
     print("\n" + "=" * 60)
     print("✓ Bias analysis complete!")
-    print("  Generated:")
-    print("    - 20 heatmaps (4 combinations × 5 questions)")
-    print("      • Lima Humans × Lima Videos (1-100)")
-    print("      • Lima Humans × NYC Videos (101-200)")
-    print("      • NYC Humans × Lima Videos (1-100)")
-    print("      • NYC Humans × NYC Videos (101-200)")
-    print("    - 8 distribution plots (4 combinations × 2 types)")
-    print("=" * 60)
+    #print("  Generated:")
+    #print("    - 20 heatmaps (4 combinations × 5 questions)")
+    #print("      • Lima Humans × Lima Videos (1-100)")
+    #print("      • Lima Humans × NYC Videos (101-200)")
+    #print("      • NYC Humans × Lima Videos (1-100)")
+    #print("      • NYC Humans × NYC Videos (101-200)")
+    #print("    - 8 distribution plots (4 combinations × 2 types)")
+    #print("=" * 60)
 
 
 if __name__ == "__main__":

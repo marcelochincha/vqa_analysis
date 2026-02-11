@@ -72,3 +72,35 @@ def compute_blocks(df: pd.DataFrame) -> pd.DataFrame:
     if "QUESTION_NUM" in df.columns:
         df["BLOCK"] = ((df["QUESTION_NUM"] - 1) // config.QUESTIONS_PER_BLOCK) + 1
     return df
+
+
+def aggregate_scores_by_block(pairwise_df: pd.DataFrame, score_column: str = "score") -> pd.DataFrame:
+    """Aggregate pairwise scores by blocks.
+    
+    Parameters
+    ----------
+    pairwise_df : pd.DataFrame
+        Pairwise scores with VIDEO, QUESTION_NUM, AGENT_I, AGENT_J, and score columns.
+    score_column : str, optional
+        Name of the score column to aggregate (default: 'score').
+    
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated scores with BLOCK, AGENT_I, AGENT_J, MEAN_SCORE, COUNT, etc.
+    """
+    df = pairwise_df.copy()
+    
+    # Add block column
+    compute_blocks(df)
+    
+    # Aggregate by block and agent pair
+    aggregated = df.groupby(['BLOCK', 'AGENT_I', 'AGENT_J'])[score_column].agg([
+        ('MEAN_SCORE', 'mean'),
+        ('COUNT', 'count'),
+        ('MIN_SCORE', 'min'),
+        ('MAX_SCORE', 'max'),
+        ('STD_SCORE', 'std'),
+    ]).reset_index()
+    
+    return aggregated

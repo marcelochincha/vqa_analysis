@@ -126,7 +126,8 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
             output_path=similarity_path,
             cmap=cmap,  # Different colormap for STSB
             vmin=0.0,
-            vmax=1.0
+            vmax=1.0,
+            use_group_colors=True
         )
         
         # Agreement heatmap
@@ -141,7 +142,8 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
             aggrement_matrix,
             title=f"STSB-RoBERTa Agreement - Block {block}",
             output_path=agreement_path,
-            cmap=cmap, 
+            cmap=cmap,
+            use_group_colors=True
         )
     
     print(f"✓ Generated {config.NUM_BLOCKS * 2} STSB-RoBERTa heatmap plots")

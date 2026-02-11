@@ -4,9 +4,133 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from typing import Optional
+from typing import Optional, Tuple
+from matplotlib.colors import LinearSegmentedColormap
 from src import config, utils
 
+
+# ============================================================================
+# Helper Functions for Grouped Analysis
+# ============================================================================
+
+def get_agent_group(agent: str) -> str:
+    """Determine group of agent (VLM, LIMA, or NYC).
+    
+    Parameters
+    ----------
+    agent : str
+        Agent name
+    
+    Returns
+    -------
+    str
+        One of: "VLM", "LIMA", "NYC"
+    """
+    if agent in config.VLM_AGENTS:
+        return "VLM"
+    elif agent in config.LIMA_AGENTS:
+        return "LIMA"
+    elif agent in config.NYC_AGENTS:
+        return "NYC"
+    else:
+        return "UNKNOWN"
+
+
+def reorder_matrix_by_groups(matrix: pd.DataFrame) -> pd.DataFrame:
+    """Reorder matrix rows and columns to group by agent type.
+    
+    Order: VLM agents first, then LIMA agents, then NYC agents.
+    
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Square similarity/agreement matrix with agents as index and columns
+    
+    Returns
+    -------
+    pd.DataFrame
+        Reordered matrix with agents grouped by type
+    """
+    agents = matrix.index.tolist()
+    
+    vlm_agents = [a for a in agents if get_agent_group(a) == "VLM"]
+    lima_agents = [a for a in agents if get_agent_group(a) == "LIMA"]
+    nyc_agents = [a for a in agents if get_agent_group(a) == "NYC"]
+    
+    # Maintain sort within each group for consistency
+    vlm_agents = sorted(vlm_agents)
+    lima_agents = sorted(lima_agents)
+    nyc_agents = sorted(nyc_agents)
+    
+    # Concatenate in order: VLM -> LIMA -> NYC
+    ordered_agents = vlm_agents + lima_agents + nyc_agents
+    
+    # Reorder rows and columns
+    reordered_matrix = matrix.loc[ordered_agents, ordered_agents]
+    
+    print(f"✓ Reordered matrix: {len(vlm_agents)} VLM, {len(lima_agents)} LIMA, {len(nyc_agents)} NYC agents")
+    return reordered_matrix
+
+
+def get_group_pair(agent_i: str, agent_j: str) -> str:
+    """Get the group pair for two agents.
+    
+    Returns one of: "VLM-VLM", "LIMA-LIMA", "NYC-NYC", "INTER"
+    """
+    group_i = get_agent_group(agent_i)
+    group_j = get_agent_group(agent_j)
+    
+    if group_i == group_j:
+        return f"{group_i}"
+    else:
+        return "INTER"
+
+
+def create_grouped_colormap(group_pair: str) -> LinearSegmentedColormap:
+    """Create LinearSegmentedColormap for a group pair.
+    
+    - Same group: white to group color
+    - Different groups: white to gray
+    
+    Parameters
+    ----------
+    group_pair : str
+        One of: "VLM-VLM", "LIMA-LIMA", "NYC-NYC", "INTER"
+    
+    Returns
+    -------
+    LinearSegmentedColormap
+        Colormap from white to endpoint color
+    """
+    base = config.PLOT_COLORS["BASE"]  # Base color (white or light gray)
+    if group_pair == "VLM":
+        # VLM: green
+        vlm_color = config.PLOT_COLORS["VLM"]
+        return LinearSegmentedColormap.from_list(
+            "vlm_cmap",
+            [base, vlm_color]
+        )
+    elif group_pair == "LIMA":
+        # LIMA: blue
+        lima_color = config.PLOT_COLORS["HUMAN_LIMA"]
+        return LinearSegmentedColormap.from_list(
+            "lima_cmap",
+            [base, lima_color]
+        )
+    elif group_pair == "NYC":
+        # NYC: red
+        nyc_color = config.PLOT_COLORS["HUMAN_NYC"]
+        return LinearSegmentedColormap.from_list(
+            "nyc_cmap",
+            [base, nyc_color]
+        )
+    else:  # INTER
+        # Inter-group: white to gray
+        other_color = config.PLOT_COLORS["OTHER"]
+        return LinearSegmentedColormap.from_list(
+            "inter_cmap",
+            [base, other_color]
+        )
 
 def create_similarity_matrix(aggregated_df: pd.DataFrame, 
                               block: int,
@@ -126,38 +250,186 @@ def plot_similarity_heatmap(matrix: pd.DataFrame,
                              vmin: float = 0,
                              vmax: float = 1,
                              annot: bool = True,
-                             fmt: str = ".2f") -> None:
-    """Plot similarity heatmap with annotations."""
+                             fmt: str = ".2f",
+                             use_group_colors: bool = True) -> None:
+    """Plot similarity heatmap with group-based colormaps.
+    
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Similarity matrix with agents as index and columns
+    title : str
+        Plot title
+    output_path : str
+        Path to save the figure
+    cmap : str, optional
+        Fallback colormap name (used if use_group_colors=False)
+    vmin : float, optional
+        Minimum value for color scaling
+    vmax : float, optional
+        Maximum value for color scaling
+    annot : bool, optional
+        Whether to annotate cells with values
+    fmt : str, optional
+        Format string for annotations
+    use_group_colors : bool, optional
+        If True, apply group-specific colormaps; if False, use single cmap
+    """
     plt.style.use("default")
     
+    if use_group_colors:
+        matrix = reorder_matrix_by_groups(matrix)
+    
     fig, ax = plt.subplots(figsize=config.PLOT_CONFIG["figsize"])
+    ax.set_aspect('equal', adjustable='box') 
+    plt.subplots_adjust(bottom=0.25, right=0.85)  # Make space for colorbars on right
     
-    # Create mask for upper triangle (optional)
-    #mask = np.triu(np.ones_like(matrix, dtype=bool), k=1)
+    # Normalize values to [0, 1] range
+    values = matrix.values.copy()
+    values_norm = (values - vmin) / (vmax - vmin)
+    values_norm = np.clip(values_norm, 0, 1)
     
-    # Plot heatmap
-    sns.heatmap(
-        matrix,
-     #   mask=mask,
-        annot=annot,
-        fmt=fmt,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-        square=True,
-        linewidths=0.5,
-        linecolor='gray',
-        cbar_kws={"shrink": 0.8, "label": "Similarity Score"},
-        ax=ax
-    )
+    agents = matrix.index.tolist()
+    n_agents = len(agents)
+    
+    if use_group_colors:
+        # Create custom color array where each cell gets colored based on its group pair
+        color_array = np.zeros((n_agents, n_agents, 3))  # RGB
+        
+        for i in range(n_agents):
+            for j in range(n_agents):
+                agent_i = agents[i]
+                agent_j = agents[j]
+                group_pair = get_group_pair(agent_i, agent_j)
+                cmap_group = create_grouped_colormap(group_pair)
+                
+                # Normalize value and get color from colormap
+                norm_val = values_norm[i, j]
+                rgb = cmap_group(norm_val)[:3]  # Take RGB, ignore alpha
+                color_array[i, j] = rgb
+        
+        # Plot using pcolormesh for full control
+        im = ax.pcolormesh(
+            np.arange(n_agents + 1),
+            np.arange(n_agents + 1),
+            values,
+            cmap='gray',  # Dummy cmap, we'll override with color_array
+            vmin=vmin,
+            vmax=vmax,
+            shading='flat',
+        )
+        im.remove()  # Remove the default colormap
+        
+        # Apply custom colors
+        for i in range(n_agents):
+            for j in range(n_agents):
+                ax.add_patch(plt.Rectangle(
+                    (j, n_agents - i - 1),
+                    1, 1,
+                    facecolor=color_array[i, j],
+                    edgecolor='gray',
+                    linewidth=0.5
+                ))
+        
+        # Add annotations
+        if annot:
+            for i in range(n_agents):
+                for j in range(n_agents):
+                    text = format(values[i, j], fmt)
+                    ax.text(
+                        j + 0.5,
+                        n_agents - i - 0.5,
+                        text,
+                        ha='center',
+                        va='center',
+                        fontsize=8,
+                        color='black'
+                    )
+                    
+        
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        divider = make_axes_locatable(ax)
+        rampas = ['VLM', "LIMA", "NYC", "INTER"]  # Nombres de las rampas para cada grupo
+        for i, cmap_name in enumerate(rampas):
+            espacio = 0.2 if i == 0 else 0.0 
+            
+            # Creamos el eje para la rampa
+            cax = divider.append_axes("right", size="3%", pad=espacio)
+            
+            sm = plt.cm.ScalarMappable(cmap=create_grouped_colormap(cmap_name), norm=plt.Normalize(0, 1))
+            
+            # Creamos la colorbar
+            cbar = fig.colorbar(sm, cax=cax)
+            
+            # LÓGICA DE LOS TICKS:
+            if i < len(rampas) - 1:
+                # Si no es la última rampa, quitamos los números/ticks
+                cax.set_yticks([]) 
+            else:
+                # Solo la última rampa lleva etiqueta general si gustas
+                cbar.set_label('Similarity score', rotation=90, labelpad=15)
+                cbar.ax.yaxis.label.set_size(12)
+                #also sert to number ticks
+                cbar.ax.tick_params(labelsize=12)
+                
+
+        # Add combined colorbar showing all group colormaps with individual scales (on the right)
+        # cbar_width = 0.02
+        # gap = 0.005
+        # right_edge = ax.get_position().x1 + 0.01
+        
+        # for idx, group in enumerate(["VLM-VLM", "LIMA-LIMA", "NYC-NYC", "INTER"]):
+        #     cbar_x = right_edge + idx * (cbar_width + gap)
+        #     cbar_ax = fig.add_axes([cbar_x, ax.get_position().y0, cbar_width, ax.get_position().height])
+            
+        #     cmap = create_grouped_colormap(group)
+            
+        #     # Create vertical gradient
+        #     gradient = np.linspace(1, 0, 256).reshape(256, 1)
+        #     cbar_image = np.zeros((256, 1, 3))
+        #     for i in range(256):
+        #         color = cmap(gradient[i, 0])[:3]
+        #         cbar_image[i, 0, :] = color
+            
+        #     cbar_ax.imshow(cbar_image, aspect='auto', extent=[0, 1, 0, 1], origin='lower')
+        #     cbar_ax.set_xticks([])
+        #     cbar_ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        #     cbar_ax.set_yticklabels(['0', '0.25', '0.5', '0.75', '1'], fontsize=7)
+            
+        #     if idx > 0:
+        #         cbar_ax.set_yticklabels([])
+            
+        #     cbar_ax.spines['top'].set_visible(False)
+        #     cbar_ax.spines['right'].set_visible(False)
+        #     cbar_ax.spines['left'].set_visible(idx == 0)
+        
+        ax.set_xlim(0, n_agents)
+        ax.set_ylim(0, n_agents)
+        ax.set_xticks(np.arange(n_agents) + 0.5)
+        ax.set_yticks(np.arange(n_agents) + 0.5)
+        ax.set_xticklabels(agents, rotation=45, ha='right', fontsize=9)
+        ax.set_yticklabels(reversed(agents), fontsize=9)
+        ax.invert_yaxis()
+        
+    else:
+        # Original single-colormap approach
+        sns.heatmap(
+            matrix,
+            annot=annot,
+            fmt=fmt,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            square=True,
+            linewidths=0.5,
+            linecolor='gray',
+            cbar_kws={"shrink": 0.8, "label": "Similarity Score"},
+            ax=ax,
+        )
     
     ax.set_title(title, fontsize=14, fontweight="bold", pad=15)
     ax.set_xlabel("Agent (Reference)", fontsize=12)
     ax.set_ylabel("Agent (Candidate)", fontsize=12)
-    
-    plt.xticks(rotation=45, ha="right")
-    plt.yticks(rotation=0)
-    plt.tight_layout()
     
     utils.ensure_output_dir(os.path.dirname(output_path))
     plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
@@ -169,50 +441,136 @@ def plot_similarity_heatmap(matrix: pd.DataFrame,
 def plot_agreement_heatmap(matrix: pd.DataFrame,
                             title: str,
                             output_path: str,
-                            cmap) -> None:
-    """Plot agreement heatmap with categorical coloring based on thresholds."""
+                            cmap: str = "RdYlGn",
+                            use_group_colors: bool = True) -> None:
+    """Plot agreement heatmap with group-based colormaps.
+    
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Agreement matrix with agents as index and columns (values 0-100)
+    title : str
+        Plot title
+    output_path : str
+        Path to save the figure
+    cmap : str, optional
+        Fallback colormap name (used if use_group_colors=False)
+    use_group_colors : bool, optional
+        If True, apply group-specific colormaps; if False, use single cmap
+    """
     plt.style.use("default")
     
-    # Create categorical matrix
-    agreement_matrix = matrix.copy()
-    #agreement_cat = pd.DataFrame(
-    #    np.where(matrix >= thresholds["high"], 3,
-    #    np.where(matrix >= thresholds["medium"], 2, 1)),
-    #    index=matrix.index,
-    #    columns=matrix.columns
-    #)
+    if use_group_colors:
+        matrix = reorder_matrix_by_groups(matrix)
     
     fig, ax = plt.subplots(figsize=config.PLOT_CONFIG["figsize"])
+    ax.set_aspect('equal', adjustable='box') 
+    plt.subplots_adjust(bottom=0.25, right=0.85)  # Make space for colorbars on right
     
-    # Mask upper triangle
-    # mask = np.triu(np.ones_like(agreement_cat, dtype=bool), k=1)
+    # Normalize values to [0, 1] range (agreement is 0-100)
+    values = matrix.values.copy()
+    values_norm = values / 100.0
+    vmin, vmax = 0, 100
     
-    # Custom colormap for categories
-    sns.heatmap(
-        agreement_matrix,
-    #    mask=mask,
-        annot=matrix,
-        fmt=".0f",
-        cmap=cmap,
-        vmin=0,
-        vmax=100,
-        square=True,
-        linewidths=0.5,
-        cbar_kws={
-            "shrink": 0.8,
-            "label": "Agreement Level %",
-        },
-        ax=ax
-    )
+    agents = matrix.index.tolist()
+    n_agents = len(agents)
     
-    # Update colorbar labels
+    if use_group_colors:
+        # Create custom color array
+        color_array = np.zeros((n_agents, n_agents, 3))  # RGB
+        
+        for i in range(n_agents):
+            for j in range(n_agents):
+                agent_i = agents[i]
+                agent_j = agents[j]
+                group_pair = get_group_pair(agent_i, agent_j)
+                cmap_group = create_grouped_colormap(group_pair)
+                
+                # Normalize value (0-100 to 0-1) and get color
+                norm_val = values_norm[i, j]
+                rgb = cmap_group(norm_val)[:3]
+                color_array[i, j] = rgb
+        
+        # Plot using rectangles
+        for i in range(n_agents):
+            for j in range(n_agents):
+                ax.add_patch(plt.Rectangle(
+                    (j, n_agents - i - 1),
+                    1, 1,
+                    facecolor=color_array[i, j],
+                    edgecolor='gray',
+                    linewidth=0.5
+                ))
+        
+        # Add annotations
+        for i in range(n_agents):
+            for j in range(n_agents):
+                text = f"{values[i, j]:.0f}"
+                ax.text(
+                    j + 0.5,
+                    n_agents - i - 0.5,
+                    text,
+                    ha='center',
+                    va='center',
+                    fontsize=8,
+                    color='black'
+                )
+        
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        divider = make_axes_locatable(ax)
+        rampas = ['VLM', "LIMA", "NYC", "INTER"]  # Nombres de las rampas para cada grupo
+        for i, cmap_name in enumerate(rampas):
+            espacio = 0.2 if i == 0 else 0.0 
+            
+            # Creamos el eje para la rampa
+            cax = divider.append_axes("right", size="3%", pad=espacio)
+            
+            sm = plt.cm.ScalarMappable(cmap=create_grouped_colormap(cmap_name), norm=plt.Normalize(0, 1))
+            
+            # Creamos la colorbar
+            cbar = fig.colorbar(sm, cax=cax)
+            
+            # LÓGICA DE LOS TICKS:
+            if i < len(rampas) - 1:
+                # Si no es la última rampa, quitamos los números/ticks
+                cax.set_yticks([]) 
+            else:
+                # Solo la última rampa lleva etiqueta general si gustas
+                cbar.set_label('Similarity score', rotation=90, labelpad=15)
+                cbar.ax.yaxis.label.set_size(12)
+                #also sert to number ticks
+                cbar.ax.tick_params(labelsize=12)
+        
+        ax.set_xlim(0, n_agents)
+        ax.set_ylim(0, n_agents)
+        ax.set_xticks(np.arange(n_agents) + 0.5)
+        ax.set_yticks(np.arange(n_agents) + 0.5)
+        ax.set_xticklabels(agents, rotation=45, ha='right', fontsize=9)
+        ax.set_yticklabels(reversed(agents), fontsize=9)
+        ax.invert_yaxis()
+        
+    else:
+        # Original single-colormap approach
+        sns.heatmap(
+            matrix,
+            annot=matrix,
+            cmap=cmap,
+            fmt=".0f",
+            vmin=0,
+            vmax=100,
+            square=True,
+            linewidths=0.5,
+            linecolor='gray',
+            cbar_kws={
+                "shrink": 0.8,
+                "label": "Agreement Level %",
+            },
+            ax=ax
+        )
+    
     ax.set_title(title, fontsize=14, fontweight="bold", pad=15)
     ax.set_xlabel("Agent (Reference)", fontsize=12)
     ax.set_ylabel("Agent (Candidate)", fontsize=12)
-    
-    plt.xticks(rotation=45, ha="right")
-    plt.yticks(rotation=0)
-    plt.tight_layout()
     
     utils.ensure_output_dir(os.path.dirname(output_path))
     plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")

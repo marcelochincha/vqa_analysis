@@ -29,7 +29,11 @@ BERT_SCORES = {
 }
 
 SMATCH_SCORES = {
+    "amr_cache": os.path.join(OUTPUT_SMATCH_DIR, "amr_cache.csv"),  # Legacy: by (agent, video, qnum)
+    "amr_cache_by_text": os.path.join(OUTPUT_SMATCH_DIR, "amr_cache_by_text.csv"),  # Optimized: by unique text
+    "smatch_cache_by_pairs": os.path.join(OUTPUT_SMATCH_DIR, "smatch_cache_by_pairs.csv"),  # Optimized: by text pairs
     "pairwise": os.path.join(OUTPUT_SMATCH_DIR, "pairwise_smatch_scores.csv"),
+    "pairwise_partial": os.path.join(OUTPUT_SMATCH_DIR, "pairwise_smatch_scores_partial.csv"),
     "aggregated": os.path.join(OUTPUT_SMATCH_DIR, "aggregated_smatch_block_scores.csv")
 }
 
@@ -41,14 +45,35 @@ STSB_SCORES = {
 # Plot parameters
 PLOT_CONFIG = {
     "figsize": (12, 10),
-    "dpi": 300,
+    "dpi": 150,
     "font_scale": 1.2,
-    "cmap_similarity": "RdYlGn",
-    "cmap_agreement": "Blues",
-    "cmap_bias": "RdBu_r"
+    "title_fontsize": 16,
+    "legend_fontsize": 12,
+    #use sns color palette for better aesthetics red for lima, blue for nyc, green for vlm
+    #USE HSV COLORS FOR BETTER DISTINCTION
+}
+import colorsys
+S = 1
+V = 0.5  # 80%
+
+_colors_hsv = {
+    "BASE": (0.0, 0.0, 1.0),        # Blanco puro (Valor 0 debe ser blanco para contraste)
+    "VLM": (0.0, 0.0, 0.4),        # Verde bosque profundo (S alta, V media)
+    "HUMAN_LIMA": (0.0, 0.9, 0.8),  # Rojo vibrante (S alta, V alta)
+    "HUMAN_NYC": (0.6, 0.8, 0.9),   # Azul eléctrico (S media, V alta)
+    "OTHER": (0.0, 0.0, 0.4)        # Gris carbón (Para que destaque sobre el blanco)
 }
 
-# Agent groups
+PLOT_COLORS = {}
+
+for key, hex_color in _colors_hsv.items():
+    h, s, v = hex_color
+    r, g, b = colorsys.hsv_to_rgb(h, s , v)
+    PLOT_COLORS[key] = (r,g,b)
+    
+
+
+# Agent groups MODIFY THIS WHEN ADDING NEW AGENTS
 LIMA_AGENTS = [f"human_lima_{i}" for i in range(1, 11)]
 NYC_AGENTS = ["human_nyc_11", "human_nyc_12"]
 HUMAN_AGENTS = LIMA_AGENTS + NYC_AGENTS
@@ -65,28 +90,6 @@ VLM_AGENTS = [
     "Qwen3-VL-8B-Instruct",
     "VideoLLaMA3-7B"
 ]
-
-# Color scheme: VLMs = orange/red tones, Lima = light blues, NYC = dark blues
-VLM_COLORS = [
-    "#FF6B35",
-]
-
-LIMA_COLORS = [
-    "#4A90E2",
-]
-
-NYC_COLORS = [
-    "#1E3A8A"
-]
-
-# Individual agent color mapping
-AGENT_COLORS_MAP = {}
-for i, agent in enumerate(VLM_AGENTS):
-    AGENT_COLORS_MAP[agent] = VLM_COLORS[i % len(VLM_COLORS)]
-for i, agent in enumerate(LIMA_AGENTS):
-    AGENT_COLORS_MAP[agent] = LIMA_COLORS[i % len(LIMA_COLORS)]
-for i, agent in enumerate(NYC_AGENTS):
-    AGENT_COLORS_MAP[agent] = NYC_COLORS[i % len(NYC_COLORS)]
 
 # Individual agent marker mapping
 VLM_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
@@ -105,4 +108,13 @@ for i, agent in enumerate(NYC_AGENTS):
 QUESTIONS_PER_BLOCK = 5
 NUM_BLOCKS = 4
 
-LEYEND_SIZE = 12
+# SMATCH-specific configuration
+SMATCH_CONFIG = {
+    "batch_size_amr": 5,       # GPU batch for AMR parsing (optimized for 4GB VRAM)
+    "max_workers": 8,          # Thread pool for parallel SMATCH scoring
+    "checkpoint_amr": 15,     # Save AMR cache every N parses
+    "checkpoint_scores": 1000, # Save scores every N comparisons
+    "normalize_text": True,    # Strip whitespace and collapse spaces for deduplication
+    "case_sensitive": True,    # Preserve case (True) or lowercase for matching (False)
+    "use_text_deduplication": True  # Use optimized text-based caching (recommended)
+}
