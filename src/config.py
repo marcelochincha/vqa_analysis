@@ -135,7 +135,7 @@ except Exception:
 # Individual agent marker mapping
 VLM_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
 LIMA_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
-NYC_MARKERS = ["o", "s"]
+NYC_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
 
 AGENT_MARKERS_MAP = {}
 for i, agent in enumerate(VLM_AGENTS):
