@@ -16,6 +16,8 @@ from src import config, utils
 def get_agent_group(agent: str) -> str:
     """Determine group of agent (VLM, LIMA, or NYC).
     
+    Uses dynamic agent lists from config (auto-discovered from CSV).
+    
     Parameters
     ----------
     agent : str
@@ -24,15 +26,22 @@ def get_agent_group(agent: str) -> str:
     Returns
     -------
     str
-        One of: "VLM", "LIMA", "NYC"
+        One of: "VLM", "LIMA", "NYC", or "UNKNOWN"
     """
-    if agent in config.VLM_AGENTS:
-        return "VLM"
-    elif agent in config.LIMA_AGENTS:
+    if agent in config.LIMA_AGENTS:
         return "LIMA"
     elif agent in config.NYC_AGENTS:
         return "NYC"
+    elif agent.startswith("human_lima_"):
+        return "LIMA"
+    elif agent.startswith("human_nyc_"):
+        return "NYC"
+    elif agent in config.VLM_AGENTS:
+        return "VLM"
     else:
+        # Fallback: anything not human is VLM
+        if not agent.startswith("human_"):
+            return "VLM"
         return "UNKNOWN"
 
 

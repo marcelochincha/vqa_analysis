@@ -289,6 +289,9 @@ def main():
     Method: Unit consensus - compare each VLM vs each human, average signs.
     Video regions: Lima (1-100), NYC (101-200).
     Output: 20 heatmaps (4 human×video combinations × 5 questions) + distribution plots.
+    
+    Supports lightweight caching: bias scores are saved to CSV so that
+    re-runs with the same agents skip computation.
     """
     print("=" * 60)
     print("BIAS ANALYSIS - Block 2 (Q6-Q10)")
@@ -309,25 +312,51 @@ def main():
     print(f"  Videos: {df_ratings['VIDEO'].nunique()}")
     print(f"  Questions: {sorted(df_ratings['QUESTION_NUM'].unique())}")
     
+    cache_path = config.BIAS_CACHE["scores"]
     
-    bias_df = compute_unit_consensus_bias(df_ratings, human_region="lima", video_region="both")
-    for q in [6, 7, 8, 9, 10]:
-        plot_bias_heatmap_per_question(
-            bias_df, 
-            human_region="lima",
-            video_region="both",
-            question_num=q, 
-            output_dir=config.OUTPUT_BIAS_DIR
-        )
-    bias_df = compute_unit_consensus_bias(df_ratings, human_region="nyc", video_region="both")
-    for q in [6, 7, 8, 9, 10]:
-        plot_bias_heatmap_per_question(
-            bias_df, 
-            human_region="nyc",
-            video_region="both",
-            question_num=q, 
-            output_dir=config.OUTPUT_BIAS_DIR
-        )
+    # Check cache
+    cached_bias = None
+    if os.path.exists(cache_path):
+        cached_bias = pd.read_csv(cache_path)
+        cached_agents = set(cached_bias["AGENT"].unique())
+        current_vlms = set(config.VLM_AGENTS)
+        if cached_agents == current_vlms:
+            print(f"✓ Bias scores cached ({len(cached_bias)} rows) — skipping computation")
+        else:
+            new_vlms = current_vlms - cached_agents
+            print(f"⚡ {len(new_vlms)} new VLM(s) detected — recomputing bias")
+            cached_bias = None
+    
+    if cached_bias is None:
+        all_bias = []
+        
+        bias_df_lima = compute_unit_consensus_bias(df_ratings, human_region="lima", video_region="both")
+        bias_df_lima["human_region"] = "lima"
+        all_bias.append(bias_df_lima)
+        
+        bias_df_nyc = compute_unit_consensus_bias(df_ratings, human_region="nyc", video_region="both")
+        bias_df_nyc["human_region"] = "nyc"
+        all_bias.append(bias_df_nyc)
+        
+        combined = pd.concat(all_bias, ignore_index=True)
+        utils.ensure_output_dir(os.path.dirname(cache_path))
+        combined.to_csv(cache_path, index=False)
+        print(f"✓ Cached bias scores: {cache_path}")
+        
+        # Plot
+        for q in [6, 7, 8, 9, 10]:
+            plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+        for q in [6, 7, 8, 9, 10]:
+            plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+    else:
+        # Use cached data for plotting
+        bias_df_lima = cached_bias[cached_bias["human_region"] == "lima"]
+        bias_df_nyc = cached_bias[cached_bias["human_region"] == "nyc"]
+        
+        for q in [6, 7, 8, 9, 10]:
+            plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+        for q in [6, 7, 8, 9, 10]:
+            plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
     
     
     # # Analyze by 4 combinations: human region × video region

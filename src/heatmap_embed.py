@@ -13,8 +13,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.decomposition import PCA
 
 def check_embedding_cache(cache_path):
-    """Check if the embedding cache exists."""
-    if not os.path.exists(cache_path):
+    """Check if the embedding cache exists (keyed or legacy)."""
+    keyed_path = config.EMBEDDING_CACHE["keyed"]
+    legacy_path = config.EMBEDDING_CACHE["legacy_npy"]
+    if not os.path.exists(keyed_path) and not os.path.exists(legacy_path):
         print("\n⚠ Embedding cache not found! Please run `embed_analysis.py` to generate embeddings first.\n")
         sys.exit(1)
 
@@ -87,6 +89,11 @@ def process_vlm_embeddings(embeddings: np.ndarray, metadata: pd.DataFrame, mode:
     """
     vlm_mask = metadata["AGENT"].isin(config.VLM_AGENTS)
     human_mask = ~vlm_mask
+    
+    # Fallback: if no VLM agents matched (dynamic discovery), detect by prefix
+    if not vlm_mask.any():
+        human_mask = metadata["AGENT"].str.startswith("human_")
+        vlm_mask = ~human_mask
 
     # Separate humans and VLMs
     human_embeddings = embeddings[human_mask]
@@ -158,32 +165,90 @@ def compute_pairwise_scores(embeddings, metadata):
     return pd.DataFrame(pairwise_scores)
 
 def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path):
-    """Compute pairwise cosine similarity scores with caching."""
-    # Check if cache exists
+    """Compute pairwise cosine similarity scores with incremental caching.
+    
+    If a cache file exists, loads it and only computes scores for agent
+    pairs that are missing (e.g., because a new agent was added).
+    """
+    existing_df = None
     if os.path.exists(cache_path):
         print(f"\nLoading cached pairwise scores from {cache_path}...")
-        return pd.read_csv(cache_path)
-
-    # Compute pairwise scores
-    pairwise_scores = compute_pairwise_scores(embeddings, metadata)
-
+        existing_df = pd.read_csv(cache_path)
+        
+        # Check if there are new agents
+        current_agents = set(metadata["AGENT"].unique())
+        cached_agents = set(existing_df["AGENT_I"].unique()) | set(existing_df["AGENT_J"].unique())
+        new_agents = current_agents - cached_agents
+        
+        if not new_agents:
+            print(f"  All {len(current_agents)} agents accounted for — using cache")
+            return existing_df
+        
+        print(f"  \u26a1 Detected {len(new_agents)} new agent(s): {sorted(new_agents)}")
+        print(f"  Computing only pairs involving new agents...")
+    
+    # If no cache or new agents detected, compute missing pairs
+    # For simplicity with the embedding-based approach, compute all if no cache
+    if existing_df is None:
+        pairwise_scores = compute_pairwise_scores(embeddings, metadata)
+    else:
+        # Only compute pairs involving at least one new agent
+        new_scores = []
+        for i, row_i in metadata.iterrows():
+            for j, row_j in metadata.iterrows():
+                if i >= j:
+                    continue
+                # Skip if both agents are already cached
+                if row_i["AGENT"] not in new_agents and row_j["AGENT"] not in new_agents:
+                    continue
+                score = 1 - cdist([embeddings[i]], [embeddings[j]], metric="cosine")[0][0]
+                new_scores.append({
+                    "BLOCK": row_i["BLOCK"],
+                    "AGENT_I": row_i["AGENT"],
+                    "AGENT_J": row_j["AGENT"],
+                    "COSINE_SCORE": score
+                })
+        
+        if new_scores:
+            new_df = pd.DataFrame(new_scores)
+            pairwise_scores = pd.concat([existing_df, new_df], ignore_index=True)
+            print(f"  Added {len(new_scores)} new pair scores")
+        else:
+            pairwise_scores = existing_df
+    
     # Save to cache
     print(f"\nSaving pairwise scores to cache at {cache_path}...")
     pairwise_scores.to_csv(cache_path, index=False)
-
+    
     return pairwise_scores
 
 def main():
     """Main execution: check cache, process embeddings, compute similarity, and generate heatmaps."""
     print("\n=== Cosine Similarity Heatmap Analysis ===")
 
-    # Check for embedding cache
-    cache_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "embeddings_cache.npy")
-    check_embedding_cache(cache_path)
+    # Check for embedding cache (keyed or legacy)
+    check_embedding_cache(None)
 
-    # Load embeddings and metadata
-    embeddings = np.load(cache_path)
+    # Load embeddings via the keyed cache (aligns to current CSV)
     metadata = utils.load_answers()
+
+    # Try keyed cache first, fall back to legacy .npy
+    keyed_path = config.EMBEDDING_CACHE["keyed"]
+    legacy_path = config.EMBEDDING_CACHE["legacy_npy"]
+
+    if os.path.exists(keyed_path):
+        import pickle
+        from src.embed_analysis import _make_embed_key
+        with open(keyed_path, "rb") as f:
+            cache = pickle.load(f)
+        keys = [_make_embed_key(row) for _, row in metadata.iterrows()]
+        missing = [k for k in keys if k not in cache]
+        if missing:
+            print(f"  ⚠ {len(missing)} rows missing from keyed cache — run embed_analysis.py first")
+            sys.exit(1)
+        embeddings = np.vstack([cache[k] for k in keys])
+    else:
+        embeddings = np.load(legacy_path)
 
     # Ensure 'BLOCK' column exists in metadata
     if "BLOCK" not in metadata.columns:
@@ -194,7 +259,7 @@ def main():
     parser.add_argument("--vlm-mode", choices=["mean", "first"], default="mean",
                         help="How to process VLM embeddings: 'mean' (average) or 'first' (use first response)")
     parser.add_argument("--apply-pca", action="store_true",
-                        help="Apply PCA for dimensionality reduction with 95% explained variance.")
+                        help="Apply PCA for dimensionality reduction with 95%% explained variance.")
     args = parser.parse_args()
 
     print(f"\nProcessing VLM embeddings using mode: {args.vlm_mode}\n")

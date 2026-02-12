@@ -1,6 +1,32 @@
 """Run all VQA analyses: heatmaps, embeddings, and bias analysis."""
 import sys
+import os
+import argparse
+import glob
 from datetime import datetime
+
+
+def purge_all_caches():
+    """Delete all cached scores and intermediate results to force full recomputation."""
+    from src import config
+    
+    patterns = [
+        os.path.join(config.OUTPUT_STSB_DIR, "*.csv"),
+        os.path.join(config.OUTPUT_SMATCH_DIR, "*.csv"),
+        os.path.join(config.OUTPUT_BERT_DIR, "*.csv"),
+        os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "pairwise_scores_cache.csv"),
+        os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "embeddings_cache_keyed.pkl"),
+        config.BIAS_CACHE["scores"],
+    ]
+    
+    deleted = 0
+    for pattern in patterns:
+        for f in glob.glob(pattern):
+            os.remove(f)
+            deleted += 1
+            print(f"  Deleted: {os.path.basename(f)}")
+    
+    print(f"  Purged {deleted} cached file(s)")
 
 
 def run_analysis(module_name: str, description: str):
@@ -25,6 +51,9 @@ def run_analysis(module_name: str, description: str):
         elif module_name == "bias_analysis":
             from src import bias_analysis
             bias_analysis.main()
+        elif module_name == "heatmap_embed":
+            from src import heatmap_embed
+            heatmap_embed.main()
         
         print(f"\n✓ {description} completed successfully!")
         return True
@@ -39,12 +68,26 @@ def run_analysis(module_name: str, description: str):
 
 def main():
     """Run all analyses in sequence."""
+    parser = argparse.ArgumentParser(description="VQA Analysis Suite")
+    parser.add_argument("--force-recompute", action="store_true",
+                        help="Purge all caches and recompute everything from scratch")
+    args = parser.parse_args()
+    
     start_time = datetime.now()
     
     print("\n" + "╔" + "=" * 68 + "╗")
     print("║" + " " * 20 + "VQA ANALYSIS SUITE" + " " * 30 + "║")
     print("║" + " " * 15 + "Running All Analyses" + " " * 33 + "║")
     print("╚" + "=" * 68 + "╝")
+    
+    # Auto-discover agents from CSV
+    from src import config, utils
+    agents = utils.get_agent_groups()
+    print(f"\n  Agents discovered: {len(agents['lima'])} Lima, {len(agents['nyc'])} NYC, {len(agents['vlm'])} VLM")
+    
+    if args.force_recompute:
+        print("\n⚠ --force-recompute: purging all caches...")
+        purge_all_caches()
     
     analyses = [
         ("embed_analysis", "Embedding Analysis (UMAP & PCA)"),

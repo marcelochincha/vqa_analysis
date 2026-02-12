@@ -1,6 +1,7 @@
 """Embedding analysis with UMAP and PCA dimensionality reduction."""
 import os
 import argparse
+import pickle
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -16,47 +17,137 @@ EMBED_MODEL = "Qwen/Qwen3-Embedding-4B"
 EMBED_MODEL_SMALL = "all-MiniLM-L6-v2"  # For testing or smaller datasets
 BATCH_SIZE = 64  # Adjust based on your GPU/CPU capabilities
 
+
+# ============================================================================
+# Keyed embedding cache (incremental)
+# ============================================================================
+
+def _make_embed_key(row) -> tuple:
+    """Create a unique cache key for an answer row."""
+    return (str(row["AGENT"]), str(row["VIDEO"]), int(row["QUESTION_NUM"]))
+
+
+def load_embedding_cache(cache_path: str) -> dict:
+    """Load keyed embedding cache: dict[(agent,video,qnum)] -> np.ndarray."""
+    if not os.path.exists(cache_path):
+        return {}
+    with open(cache_path, "rb") as f:
+        cache = pickle.load(f)
+    print(f"✓ Loaded keyed embedding cache: {len(cache):,} entries")
+    return cache
+
+
+def save_embedding_cache(cache: dict, cache_path: str) -> None:
+    """Save keyed embedding cache to disk."""
+    utils.ensure_output_dir(os.path.dirname(cache_path))
+    with open(cache_path, "wb") as f:
+        pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✓ Saved keyed embedding cache: {len(cache):,} entries")
+
+
+def migrate_npy_to_keyed_cache(npy_path: str, keyed_path: str, df: pd.DataFrame) -> dict:
+    """Migrate legacy monolithic .npy cache to keyed dict cache.
+    
+    The .npy stores embeddings aligned by row order of the CSV used to
+    create it.  We pair each row of ``df`` with the corresponding
+    embedding vector and build the keyed dict.
+    """
+    print("\n--- Migrating legacy .npy embedding cache to keyed format ---")
+    embeddings = np.load(npy_path)
+    
+    if len(embeddings) != len(df):
+        print(f"  ⚠ Shape mismatch: .npy has {len(embeddings)} rows, CSV has {len(df)} rows")
+        print("    Migration will use min(npy_rows, csv_rows)")
+    
+    n = min(len(embeddings), len(df))
+    cache = {}
+    for i in range(n):
+        key = _make_embed_key(df.iloc[i])
+        cache[key] = embeddings[i]
+    
+    save_embedding_cache(cache, keyed_path)
+    print(f"  ✓ Migrated {len(cache):,} embeddings to keyed cache")
+    return cache
+
+
 def generate_embeddings(df: pd.DataFrame, use_cache: bool = False) -> tuple:
     """
-    Generate sentence embeddings for all answers.
+    Generate sentence embeddings for all answers (incremental).
+    
+    Uses a keyed dict cache so that adding new agents only requires
+    encoding their answers, not re-encoding everything.
     
     Args:
-        use_cache: If True, try to load cached embeddings or save after generation
-                   WARNING: Generation is expensive! Use cache carefully.
+        df: DataFrame with AGENT, VIDEO, QUESTION_NUM, ANSWER columns.
+        use_cache: If True, load/save keyed cache and only encode missing rows.
     """
-    print("\n=== Generating Embeddings ===")
+    print("\n=== Generating Embeddings (Incremental) ===")
     
-    cache_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "embeddings_cache.npy")
+    keyed_path = config.EMBEDDING_CACHE["keyed"]
+    legacy_path = config.EMBEDDING_CACHE["legacy_npy"]
     
-    # Try to load from cache if enabled
-    if use_cache and os.path.exists(cache_path):
-        print(f"⚠ Loading cached embeddings from: {os.path.basename(cache_path)}")
-        embeddings = np.load(cache_path)
-        print(f"✓ Loaded cached embeddings of shape {embeddings.shape}")
-        return embeddings, df
+    cache: dict = {}
     
-    # Load sentence transformer model
-    print("Loading sentence transformer model...")
-    model = SentenceTransformer(
-        EMBED_MODEL,
-        model_kwargs={"attn_implementation": "flash_attention_2", "device_map": "auto", "torch_dtype": "bfloat16"},
-        tokenizer_kwargs={"padding_side": "left"},
-    )
-    print("✓ Model loaded")
-    
-    # Get answers as list
-    answers = df["ANSWER"].astype(str).tolist()
-    
-    # Generate embeddings (EXPENSIVE!)
-    print(f"⚠ Encoding {len(answers)} answers... (this may take time)")
-    embeddings = model.encode(answers, show_progress_bar=True, batch_size=BATCH_SIZE)
-    print(f"✓ Generated embeddings of shape {embeddings.shape}")
-    
-    # Save to cache if enabled
     if use_cache:
-        utils.ensure_output_dir(config.OUTPUT_EMBEDDINGS_DIR)
-        np.save(cache_path, embeddings)
-        print(f"✓ Cached embeddings to: {os.path.basename(cache_path)}")
+        # Try keyed cache first
+        if os.path.exists(keyed_path):
+            cache = load_embedding_cache(keyed_path)
+        # Fall back to legacy .npy and migrate
+        elif os.path.exists(legacy_path):
+            cache = migrate_npy_to_keyed_cache(legacy_path, keyed_path, df)
+    
+    # Identify rows that need embedding
+    keys_needed = [_make_embed_key(row) for _, row in df.iterrows()]
+    missing_indices = [i for i, k in enumerate(keys_needed) if k not in cache]
+    
+    print(f"  Total rows: {len(df):,}")
+    print(f"  Cached:     {len(df) - len(missing_indices):,}")
+    print(f"  To encode:  {len(missing_indices):,}")
+    
+    if missing_indices:
+        # Load model only if there's work to do
+        print("Loading sentence transformer model...")
+        model = SentenceTransformer(
+            EMBED_MODEL_SMALL,
+            #model_kwargs={"attn_implementation": "flash_attention_2", "device_map": "auto", "torch_dtype": "bfloat16"},
+            #tokenizer_kwargs={"padding_side": "left"},
+        )
+        print("✓ Model loaded")
+        
+        missing_answers = df.iloc[missing_indices]["ANSWER"].astype(str).tolist()
+        
+        print(f"⚠ Encoding {len(missing_answers)} answers... (this may take time)")
+        
+        CHECKPOINT = config.INCREMENTAL_CONFIG.get("embed_batch_checkpoint", 500)
+        
+        for start in range(0, len(missing_answers), CHECKPOINT):
+            end = min(start + CHECKPOINT, len(missing_answers))
+            batch_answers = missing_answers[start:end]
+            batch_embeddings = model.encode(batch_answers, show_progress_bar=True, batch_size=BATCH_SIZE)
+            
+            # Store in cache
+            for j, emb in enumerate(batch_embeddings):
+                idx = missing_indices[start + j]
+                key = keys_needed[idx]
+                cache[key] = emb
+            
+            # Checkpoint save
+            if use_cache:
+                save_embedding_cache(cache, keyed_path)
+                print(f"  ✓ Checkpoint: {len(cache):,} embeddings saved ({end}/{len(missing_answers)} new encoded)")
+        
+        print(f"✓ Encoded {len(missing_indices)} new answers")
+    else:
+        print("✓ All embeddings already cached — nothing to encode")
+    
+    # Build aligned array from cache in CSV row order
+    embeddings = np.vstack([cache[k] for k in keys_needed])
+    print(f"✓ Final embedding matrix: {embeddings.shape}")
+    
+    # Also save legacy .npy for backward compat (cheap — just a write)
+    if use_cache:
+        utils.ensure_output_dir(os.path.dirname(legacy_path))
+        np.save(legacy_path, embeddings)
     
     return embeddings, df
 
@@ -85,9 +176,9 @@ def process_vlm_embeddings(embeddings: np.ndarray, df: pd.DataFrame, mode: str =
     df['VIDEO_NUM'] = df['VIDEO'].str.extract(r'_(\d+)$')[0].astype(int)
     df['VIDEO_SECTOR'] = df['VIDEO_NUM'].apply(lambda x: 'Lima' if x <= 100 else 'NYC')
     
-    # Separate humans and VLMs
-    human_mask = df["AGENT"].isin(config.HUMAN_AGENTS)
-    vlm_mask = df["AGENT"].isin(config.VLM_AGENTS)
+    # Separate humans and VLMs (use dynamic detection)
+    human_mask = df["AGENT"].str.startswith("human_")
+    vlm_mask = ~human_mask
     
     # Keep all humans (they only have 1 answer per question)
     df_humans = df[human_mask].copy()
@@ -478,15 +569,9 @@ def main(use_cache: bool = True, vlm_mode: str = "mean"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Embedding analysis with UMAP and PCA")
     parser.add_argument("--no-cache", action="store_true", help="Disable embedding cache (regenerate)")
-    parser.add_argument("--mode", action="store_true", help="first or mean for VLM processing", values=["first", "mean"], default="mean")
+    parser.add_argument("--mode", choices=["first", "mean"], default="mean", help="first or mean for VLM processing")
     args = parser.parse_args()
     
-    # Determine VLM mode
-    if args.first_vlm:
-        vlm_mode = "first"
-    else:
-        vlm_mode = "mean"  # Default
-    
-    main(use_cache=not args.no_cache, vlm_mode=vlm_mode)
+    main(use_cache=not args.no_cache, vlm_mode=args.mode)
 
 

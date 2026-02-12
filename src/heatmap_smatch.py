@@ -111,30 +111,9 @@ def load_scores_partial(partial_path: str) -> pd.DataFrame:
 def normalize_answer_text(text: str) -> str:
     """Normalize answer text for deduplication matching.
     
-    Parameters
-    ----------
-    text : str
-        Raw answer text.
-    
-    Returns
-    -------
-    str
-        Normalized text (stripped, collapsed spaces, optionally lowercased).
+    Delegates to the shared utils.normalize_text() function.
     """
-    if not isinstance(text, str):
-        text = str(text) if text is not None else ""
-    
-    # Strip leading/trailing whitespace
-    text = text.strip()
-    
-    # Collapse multiple spaces/tabs/newlines to single space
-    text = re.sub(r'\s+', ' ', text)
-    
-    # Optionally lowercase (configured in config)
-    if not config.SMATCH_CONFIG.get("case_sensitive", True):
-        text = text.lower()
-    
-    return text
+    return utils.normalize_text(text)
 
 
 def save_amr_cache_by_text(text_to_amr_dict: dict, cache_path: str) -> None:
@@ -725,8 +704,20 @@ def main():
     print("-" * 60)
     
     # Compute or load scores
-    if not pairwise_exists:
-        print("\n⚠ Pairwise SMATCH scores not found. Computing (this may take a while)...")
+    # Check for new agents even if pairwise exists
+    new_agents = set()
+    if pairwise_exists:
+        new_agents = utils.detect_new_agents(config.SMATCH_SCORES["pairwise"])
+    
+    needs_recompute = not pairwise_exists or len(new_agents) > 0
+    
+    if needs_recompute:
+        if new_agents:
+            print(f"\n⚡ New agents detected: {sorted(new_agents)}")
+            print("  Will recompute pairwise scores (AMR + SMATCH caches will be reused)")
+        else:
+            print("\n⚠ Pairwise SMATCH scores not found. Computing (this may take a while)...")
+        
         if use_text_dedup:
             print("  Using OPTIMIZED method (text deduplication enabled)")
             if amr_cache_by_text_exists or smatch_cache_by_pairs_exists:

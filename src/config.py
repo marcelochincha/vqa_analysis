@@ -39,7 +39,19 @@ SMATCH_SCORES = {
 
 STSB_SCORES = {
     "pairwise": os.path.join(OUTPUT_STSB_DIR, "pairwise_stsb_scores.csv"),
+    "stsb_cache_by_pairs": os.path.join(OUTPUT_STSB_DIR, "stsb_cache_by_pairs.csv"),
     "aggregated": os.path.join(OUTPUT_STSB_DIR, "aggregated_stsb_block_scores.csv")
+}
+
+# Embedding cache (keyed dict format for incremental updates)
+EMBEDDING_CACHE = {
+    "keyed": os.path.join(OUTPUT_EMBEDDINGS_DIR, "embeddings_cache_keyed.pkl"),
+    "legacy_npy": os.path.join(OUTPUT_EMBEDDINGS_DIR, "embeddings_cache.npy"),
+}
+
+# Bias cache
+BIAS_CACHE = {
+    "scores": os.path.join(OUTPUT_BIAS_DIR, "bias_scores_cache.csv"),
 }
 
 # Plot parameters
@@ -73,7 +85,8 @@ for key, hex_color in _colors_hsv.items():
     
 
 
-# Agent groups MODIFY THIS WHEN ADDING NEW AGENTS
+# Agent groups — fallback lists (auto-discovery from CSV is preferred)
+# These are only used when the CSV is not available.
 LIMA_AGENTS = [f"human_lima_{i}" for i in range(1, 11)]
 NYC_AGENTS = ["human_nyc_11", "human_nyc_12"]
 HUMAN_AGENTS = LIMA_AGENTS + NYC_AGENTS
@@ -90,6 +103,34 @@ VLM_AGENTS = [
     "Qwen3-VL-8B-Instruct",
     "VideoLLaMA3-7B"
 ]
+
+def refresh_agent_lists_from_csv():
+    """Update module-level agent lists from the input CSV (call once at startup)."""
+    global LIMA_AGENTS, NYC_AGENTS, HUMAN_AGENTS, VLM_AGENTS, AGENT_MARKERS_MAP
+    import pandas as _pd
+    if not os.path.exists(INPUT_CSV):
+        return  # keep fallback
+    _df = _pd.read_csv(INPUT_CSV, usecols=["AGENT"])
+    _agents = sorted(_df["AGENT"].unique().tolist())
+    LIMA_AGENTS = [a for a in _agents if a.startswith("human_lima_")]
+    NYC_AGENTS = [a for a in _agents if a.startswith("human_nyc_")]
+    HUMAN_AGENTS = LIMA_AGENTS + NYC_AGENTS
+    VLM_AGENTS = [a for a in _agents if a not in HUMAN_AGENTS]
+    # Rebuild marker map
+    _all_markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
+    AGENT_MARKERS_MAP.clear()
+    for i, agent in enumerate(VLM_AGENTS):
+        AGENT_MARKERS_MAP[agent] = _all_markers[i % len(_all_markers)]
+    for i, agent in enumerate(LIMA_AGENTS):
+        AGENT_MARKERS_MAP[agent] = _all_markers[i % len(_all_markers)]
+    for i, agent in enumerate(NYC_AGENTS):
+        AGENT_MARKERS_MAP[agent] = _all_markers[i % len(_all_markers)]
+
+# Auto-discover on import (silent fail if CSV missing)
+try:
+    refresh_agent_lists_from_csv()
+except Exception:
+    pass
 
 # Individual agent marker mapping
 VLM_MARKERS = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
@@ -117,4 +158,11 @@ SMATCH_CONFIG = {
     "normalize_text": True,    # Strip whitespace and collapse spaces for deduplication
     "case_sensitive": True,    # Preserve case (True) or lowercase for matching (False)
     "use_text_deduplication": True  # Use optimized text-based caching (recommended)
+}
+
+# Shared incremental settings
+INCREMENTAL_CONFIG = {
+    "checkpoint_every": 500,   # Save intermediate results every N items
+    "embed_batch_checkpoint": 500,  # Checkpoint embedding generation every N rows
+    "stsb_pair_checkpoint": 1000,   # Checkpoint STSB pair scoring every N pairs
 }

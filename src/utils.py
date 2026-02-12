@@ -1,13 +1,103 @@
 """Shared utility functions for VQA analysis."""
 import os
+import re
 import pandas as pd
-from typing import Dict, List, Tuple
+import numpy as np
+from typing import Dict, List, Set, Tuple
 from src import config
 
 
 def ensure_output_dir(path: str) -> None:
     """Create output directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
+
+
+# ============================================================================
+# Text normalization (shared across metrics)
+# ============================================================================
+
+def normalize_text(text: str) -> str:
+    """Normalize answer text for deduplication and cache keying.
+    
+    Strips whitespace, collapses spaces, optionally lowercases.
+    Used by SMATCH and STSB for text-pair caching.
+    """
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ""
+    text = text.strip()
+    text = re.sub(r'\s+', ' ', text)
+    if not config.SMATCH_CONFIG.get("case_sensitive", True):
+        text = text.lower()
+    return text
+
+
+# ============================================================================
+# Incremental agent detection
+# ============================================================================
+
+def detect_agents_in_csv(csv_path: str = None) -> Dict[str, List[str]]:
+    """Discover all agents present in the input CSV.
+    
+    Returns dict with keys: lima, nyc, vlm, human, all.
+    Classification is by prefix: human_lima_*, human_nyc_*, else VLM.
+    """
+    csv_path = csv_path or config.INPUT_CSV
+    df = pd.read_csv(csv_path, usecols=["AGENT"])
+    agents = sorted(df["AGENT"].unique().tolist())
+    
+    lima = [a for a in agents if a.startswith("human_lima_")]
+    nyc = [a for a in agents if a.startswith("human_nyc_")]
+    human = lima + nyc
+    vlm = [a for a in agents if a not in human]
+    
+    return {
+        "lima": lima,
+        "nyc": nyc,
+        "human": human,
+        "vlm": vlm,
+        "all": human + vlm,
+    }
+
+
+def detect_new_agents(pairwise_csv_path: str, current_csv_path: str = None) -> Set[str]:
+    """Compare agents in an existing pairwise CSV vs the current input CSV.
+    
+    Returns the set of agents present in the input CSV but missing from
+    the pairwise results.  If the pairwise file does not exist, returns
+    ALL agents from the input CSV.
+    """
+    current = detect_agents_in_csv(current_csv_path)
+    current_agents = set(current["all"])
+    
+    if not os.path.exists(pairwise_csv_path):
+        return current_agents
+    
+    pw = pd.read_csv(pairwise_csv_path, usecols=["AGENT_I", "AGENT_J"])
+    existing_agents = set(pw["AGENT_I"].unique()) | set(pw["AGENT_J"].unique())
+    
+    new = current_agents - existing_agents
+    if new:
+        print(f"  ⚡ Detected {len(new)} new agent(s): {sorted(new)}")
+    return new
+
+
+def get_missing_pairs(existing_pairwise_df: pd.DataFrame | None, all_agents: List[str]) -> Set[Tuple[str, str]]:
+    """Return the set of (agent_i, agent_j) pairs not yet in existing_pairwise_df.
+    
+    Pairs are stored as sorted tuples so (A,B) == (B,A).
+    """
+    from itertools import combinations
+    all_pairs = {tuple(sorted(p)) for p in combinations(all_agents, 2)}
+    
+    if existing_pairwise_df is None or existing_pairwise_df.empty:
+        return all_pairs
+    
+    existing = set()
+    for _, row in existing_pairwise_df.iterrows():
+        existing.add(tuple(sorted([row["AGENT_I"], row["AGENT_J"]])))
+    
+    missing = all_pairs - existing
+    return missing
 
 
 def load_answers(csv_path: str = config.INPUT_CSV) -> pd.DataFrame:
@@ -37,14 +127,17 @@ def load_metric_scores(pairwise_path: str, aggregated_path: str = None) -> Tuple
 
 
 def get_agent_groups() -> Dict[str, List[str]]:
-    """Get agent groups categorized by type."""
-    return {
-        "lima": config.LIMA_AGENTS,
-        "nyc": config.NYC_AGENTS,
-        "human": config.HUMAN_AGENTS,
-        "vlm": config.VLM_AGENTS,
-        "all": config.HUMAN_AGENTS + config.VLM_AGENTS
-    }
+    """Get agent groups — auto-detected from CSV, falling back to config lists."""
+    try:
+        return detect_agents_in_csv()
+    except Exception:
+        return {
+            "lima": config.LIMA_AGENTS,
+            "nyc": config.NYC_AGENTS,
+            "human": config.HUMAN_AGENTS,
+            "vlm": config.VLM_AGENTS,
+            "all": config.HUMAN_AGENTS + config.VLM_AGENTS
+        }
 
 
 def get_agent_color(agent_name: str) -> str:
