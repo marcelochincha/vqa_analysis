@@ -9,7 +9,6 @@ from src.heatmap_common import plot_similarity_heatmap, create_agreement_matrix,
 from src import config, utils
 import argparse
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.decomposition import PCA
 
 def check_embedding_cache(cache_path):
@@ -76,7 +75,7 @@ def generate_cosine_agreement_heatmaps(pairwise_df: pd.DataFrame, metadata: pd.D
             use_group_colors=True
         )
 
-def process_vlm_embeddings(embeddings: np.ndarray, metadata: pd.DataFrame, mode: str = "mean") -> tuple:
+def process_vlm_embeddings(embeddings: np.ndarray, metadata: pd.DataFrame, mode: str = "mean", max_workers: int = 4) -> tuple:
     """Process VLM embeddings to handle multiple responses per question.
 
     Args:
@@ -134,37 +133,31 @@ def apply_pca(embeddings, variance_ratio=0.95):
     print(f"PCA applied: Reduced dimensions to {reduced_embeddings.shape[1]} components.")
     return reduced_embeddings
 
-def compute_score(i, row_i, metadata, embeddings):
-    """Compute cosine similarity scores for a given row."""
-    scores = []
-    for j, row_j in metadata.iterrows():
-        if i >= j:
-            continue
-        score = 1 - cdist([embeddings[i]], [embeddings[j]], metric="cosine")[0][0]
-        scores.append({
-            "BLOCK": row_i["BLOCK"],
-            "AGENT_I": row_i["AGENT"],
-            "AGENT_J": row_j["AGENT"],
-            "COSINE_SCORE": score
-        })
-    return scores
-
-def compute_pairwise_scores(embeddings, metadata):
+from sklearn.metrics import pairwise_distances
+def compute_pairwise_scores(embeddings, metadata, max_workers=1):
     """Compute pairwise cosine similarity scores using multithreading with tqdm progress."""
-    pairwise_scores = []
+    print("=" * 50)
+    print("Computing pairwise cosine similarity scores...")
+    print("Emebeddings shape:", embeddings.shape)
+    print("Metadata shape:", metadata.shape)
+    print(f"Using up to {max_workers} workers for parallel computation...")
+    print("=" * 50)
+    pairwise_distances_list = 1 - pairwise_distances(embeddings, metric="cosine",n_jobs=max_workers)
+    print(f"✓ Pairwise scores computed for {len(metadata)} agents ({len(pairwise_distances_list)**2} pairs)")
+    #use blas from numpy efficenly
 
-    print("\nComputing pairwise cosine similarity scores with multithreading...")
-    import concurrent
-    with concurrent.futures.ProcessPoolExecutor(max_workers=14) as executor:
-        futures = {executor.submit(compute_score, i, row_i, metadata, embeddings): i for i, row_i in metadata.iterrows()}
-        with tqdm(total=len(futures), desc="Rows processed") as pbar:
-            for future in as_completed(futures):
-                pairwise_scores.extend(future.result())
-                pbar.update(1)
+    #print("\nComputing pairwise cosine similarity scores with multithreading...")
+    #import concurrent
+    #with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+    #    futures = {executor.submit(compute_score, i, row_i, metadata, embeddings): i for i, row_i in metadata.iterrows()}
+    #    with tqdm(total=len(futures), desc="Rows processed") as pbar:
+    #        for future in as_completed(futures):
+    #            pairwise_scores.extend(future.result())
+    #            pbar.update(1)
 
-    return pd.DataFrame(pairwise_scores)
+    return pd.DataFrame(pairwise_distances_list)
 
-def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path):
+def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path, max_workers=4):
     """Compute pairwise cosine similarity scores with incremental caching.
     
     If a cache file exists, loads it and only computes scores for agent
@@ -190,6 +183,7 @@ def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path):
     # If no cache or new agents detected, compute missing pairs
     # For simplicity with the embedding-based approach, compute all if no cache
     if existing_df is None:
+        print(metadata)
         pairwise_scores = compute_pairwise_scores(embeddings, metadata)
     else:
         # Only compute pairs involving at least one new agent
@@ -226,6 +220,18 @@ def main():
     """Main execution: check cache, process embeddings, compute similarity, and generate heatmaps."""
     print("\n=== Cosine Similarity Heatmap Analysis ===")
 
+    # Parse arguments for VLM processing mode
+    parser = argparse.ArgumentParser(description="Heatmap analysis for cosine similarity of embeddings")
+    parser.add_argument("--vlm-mode", choices=["mean", "first"], default="first",
+                        help="How to process VLM embeddings: 'mean' (average) or 'first'")
+    parser.add_argument("--apply-pca", action="store_true",
+                        help="Apply PCA for dimensionality reduction with 95%% explained variance.")
+    parser.add_argument("--max-workers", type=int, default=4,
+                        help="Number of workers for parallel pairwise score computation (default: 10)")
+    args = parser.parse_args()
+
+    print(f"\nProcessing VLM embeddings using mode: {args.vlm_mode}\n")
+
     # Check for embedding cache (keyed or legacy)
     check_embedding_cache(None)
 
@@ -254,16 +260,6 @@ def main():
     if "BLOCK" not in metadata.columns:
         metadata = utils.compute_blocks(metadata)
 
-    # Parse arguments for VLM processing mode
-    parser = argparse.ArgumentParser(description="Heatmap analysis for cosine similarity of embeddings")
-    parser.add_argument("--vlm-mode", choices=["mean", "first"], default="mean",
-                        help="How to process VLM embeddings: 'mean' (average) or 'first' (use first response)")
-    parser.add_argument("--apply-pca", action="store_true",
-                        help="Apply PCA for dimensionality reduction with 95%% explained variance.")
-    args = parser.parse_args()
-
-    print(f"\nProcessing VLM embeddings using mode: {args.vlm_mode}\n")
-
     # Process embeddings based on VLM mode
     embeddings, metadata = process_vlm_embeddings(embeddings, metadata, mode=args.vlm_mode)
 
@@ -274,7 +270,7 @@ def main():
 
     # Compute pairwise cosine similarity scores with caching
     pairwise_cache_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "pairwise_scores_cache.csv")
-    pairwise_df = compute_pairwise_scores_with_cache(embeddings, metadata, pairwise_cache_path)
+    pairwise_df = compute_pairwise_scores_with_cache(embeddings, metadata, pairwise_cache_path, max_workers=args.max_workers)
 
     # Generate similarity heatmaps
     generate_cosine_similarity_heatmaps(embeddings, metadata)

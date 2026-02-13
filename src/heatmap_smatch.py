@@ -303,33 +303,42 @@ def parse_to_amr(stog, text: str) -> str:
         print(f"Warning: Failed to parse text: {text[:50]}... Error: {e}")
         return ""
 
+def clean_amr_text(entry):
+    text = re.sub(r'#.*\n', '', entry)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 def compute_smatch_score(amr1: str, amr2: str) -> float:
     """Compute SMATCH score between two AMR graphs."""
     if not amr1 or not amr2:
         return 0.0
-    
     try:
-        import smatch
+        amr1 = clean_amr_text(amr1)
+        amr2 = clean_amr_text(amr2)
         # Parse AMR strings
-        from smatch import score_amr_pairs
-        precision, recall, f1 = score_amr_pairs(
-            [(amr1, amr2)],
-            verbose=False
-        )
+        from amrlib.evaluate.smatch_enhanced import match_pair,smatch
+        score = match_pair((amr1, amr2))
+        _,_,f1 = smatch.compute_f(*score)
         return f1
     except Exception as e:
         print(f"Warning: SMATCH computation failed: {e}")
         return 0.0
 
 
-def compute_smatch_scores() -> pd.DataFrame:
+def compute_smatch_scores(skip_amr_parsing: bool = False) -> pd.DataFrame:
     """Compute pairwise SMATCH scores for all agent pairs with optimized AMR parsing.
     
     This function uses text-based deduplication to minimize redundant operations:
     1. Parse only unique answer texts to AMR graphs (GPU, batched, with checkpointing)
     2. Compute SMATCH only for unique text pairs (CPU, threaded, with checkpointing)
     3. Expand results to all agent pairs based on their answer texts
+    
+    Parameters
+    ----------
+    skip_amr_parsing : bool, optional
+        If True, skip AMR parsing and only load from existing cache.
+        Useful when you only need to recompute SMATCH scores.
+        Default is False.
     
     Returns
     -------
@@ -338,6 +347,9 @@ def compute_smatch_scores() -> pd.DataFrame:
     """
     print("\n=== Computing SMATCH Scores (Optimized with Text Deduplication) ===")
     
+    if skip_amr_parsing:
+        print("  [MODE] Skipping AMR parsing - loading from cache only")
+    
     # Check if text deduplication is enabled
     #use_text_dedup = config.SMATCH_CONFIG.get("use_text_deduplication", True)
     #
@@ -345,8 +357,11 @@ def compute_smatch_scores() -> pd.DataFrame:
     #    print("  Text deduplication disabled, using legacy method...")
     #    return compute_smatch_scores_legacy()
     
-    # Load AMR parser
-    stog = load_amr_parser()
+    # Load AMR parser only if needed
+    if not skip_amr_parsing:
+        stog = load_amr_parser()
+    else:
+        stog = None
     
     # Load answers
     df = utils.load_answers()
@@ -382,40 +397,48 @@ def compute_smatch_scores() -> pd.DataFrame:
     missing_texts = [text for text in all_unique_texts if text not in amr_cache_by_text]
     
     print(f"  Found {initial_cache_size}/{unique_texts} unique texts in cache")
+    print(missing_texts[:5])  # Show sample of missing texts
     print(f"  Need to parse {len(missing_texts)} new unique texts")
     
     # Parse missing unique texts in batches
     if len(missing_texts) > 0:
-        BATCH_SIZE = config.SMATCH_CONFIG["batch_size_amr"]
-        CHECKPOINT_FREQ = config.SMATCH_CONFIG["checkpoint_amr"]
-        pbar = tqdm.tqdm(range(0, len(missing_texts), BATCH_SIZE), desc="Parsing AMR", unit="batch")
-        for i in pbar:
-            batch_texts = missing_texts[i:i+BATCH_SIZE]
-            
-            # Parse batch (single GPU call)
-            try:
-                batch_graphs = stog.parse_sents(batch_texts)
+        if skip_amr_parsing:
+            print(f"  ⚠ SKIP MODE: {len(missing_texts)} missing texts will not be parsed")
+            print(f"    Only cached texts will be used ({initial_cache_size} texts)")
+            for text in missing_texts:
+                amr_cache_by_text[text] = ""
+            print(f"✓ Phase 1 complete: {len(amr_cache_by_text)} unique texts in cache (skip mode)")
+        else:
+            BATCH_SIZE = config.SMATCH_CONFIG["batch_size_amr"]
+            CHECKPOINT_FREQ = config.SMATCH_CONFIG["checkpoint_amr"]
+            pbar = tqdm.tqdm(range(0, len(missing_texts), BATCH_SIZE), desc="Parsing AMR", unit="batch")
+            for i in pbar:
+                batch_texts = missing_texts[i:i+BATCH_SIZE]
                 
-                # Update cache with results
-                for text, graph in zip(batch_texts, batch_graphs):
-                    amr_cache_by_text[text] = graph if graph else ""
+                # Parse batch (single GPU call)
+                try:
+                    batch_graphs = stog.parse_sents(batch_texts)
+                    
+                    # Update cache with results
+                    for text, graph in zip(batch_texts, batch_graphs):
+                        amr_cache_by_text[text] = graph if graph else ""
+                    
+                except Exception as e:
+                    print(f"  Warning: Batch parsing failed: {e}")
+                    # Add empty graphs for failed parses
+                    for text in batch_texts:
+                        amr_cache_by_text[text] = ""
                 
-            except Exception as e:
-                print(f"  Warning: Batch parsing failed: {e}")
-                # Add empty graphs for failed parses
-                for text in batch_texts:
-                    amr_cache_by_text[text] = ""
+                # Progress update
+                #parsed_so_far = min(i + BATCH_SIZE, len(missing_texts))
+                #print(f"  Parsed {initial_cache_size + parsed_so_far}/{unique_texts} unique texts ({parsed_so_far}/{len(missing_texts)} new)")
+                
+                # Checkpoint: save cache periodically
+                if (i + BATCH_SIZE) % CHECKPOINT_FREQ == 0 or (i + BATCH_SIZE) >= len(missing_texts):
+                    save_amr_cache_by_text(amr_cache_by_text, config.SMATCH_SCORES["amr_cache_by_text"])
+                    print(f"  ✓ Checkpoint: AMR cache saved ({len(amr_cache_by_text)} unique texts)")
             
-            # Progress update
-            parsed_so_far = min(i + BATCH_SIZE, len(missing_texts))
-            #print(f"  Parsed {initial_cache_size + parsed_so_far}/{unique_texts} unique texts ({parsed_so_far}/{len(missing_texts)} new)")
-            
-            # Checkpoint: save cache periodically
-            if (i + BATCH_SIZE) % CHECKPOINT_FREQ == 0 or (i + BATCH_SIZE) >= len(missing_texts):
-                save_amr_cache_by_text(amr_cache_by_text, config.SMATCH_SCORES["amr_cache_by_text"])
-                print(f"  ✓ Checkpoint: AMR cache saved ({len(amr_cache_by_text)} unique texts)")
-        
-        print(f"✓ Phase 1 complete: {len(amr_cache_by_text)} total unique AMR graphs in cache")
+            print(f"✓ Phase 1 complete: {len(amr_cache_by_text)} total unique AMR graphs in cache")
     else:
         print(f"✓ Phase 1 complete: All unique texts already cached")
     
@@ -589,7 +612,7 @@ def generate_smatch_heatmaps(aggregated_df: pd.DataFrame, pairwise_df: pd.DataFr
     
     # Generate color map
     from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list("cmap", ["#ffffff", "#00ff00"])
+    cmap = LinearSegmentedColormap.from_list("cmap", ["#ffffff", "#6be425"])
     
     for block in range(1, config.NUM_BLOCKS + 1):
         # Similarity heatmap (uses aggregated mean scores)
@@ -602,7 +625,8 @@ def generate_smatch_heatmaps(aggregated_df: pd.DataFrame, pairwise_df: pd.DataFr
         
         plot_similarity_heatmap(
             similarity_matrix,
-            title=f"SMATCH Similarity - Block {block}",
+            title=f"SMATCH F1 Score - Block {block}",
+            color_label="Similarity Score",
             output_path=similarity_path,
             cmap=cmap,
             vmin=0.0,
@@ -623,11 +647,15 @@ def generate_smatch_heatmaps(aggregated_df: pd.DataFrame, pairwise_df: pd.DataFr
             f"smatch_agreement_block{block}.png"
         )
         
-        plot_agreement_heatmap(
+        plot_similarity_heatmap(
             agreement_matrix,
-            title=f"SMATCH Agreement - Block {block}",
+            title=f"SMATCH F1 Score Agrement - Block {block}",
+            color_label="Agreement (%)",
             output_path=agreement_path,
             cmap=cmap,
+            vmin=0,
+            vmax=100,
+            fmt="%d",
             use_group_colors=True
         )
     
@@ -727,7 +755,12 @@ def main():
             if amr_cache_exists:
                 print("  (Will use existing AMR cache)")
         
-        pairwise_df = compute_smatch_scores()
+        # Auto-skip AMR parsing if cache exists and we're just recomputing SMATCH
+        skip_amr = amr_cache_by_text_exists and not new_agents
+        if skip_amr:
+            print("  ✓ Using cached AMR graphs (skipping parsing phase)")
+        
+        pairwise_df = compute_smatch_scores(skip_amr_parsing=skip_amr)
         aggregated_df = aggregate_smatch_scores(pairwise_df)
     elif not aggregated_exists:
         print("\n⚠ Aggregated SMATCH scores not found. Aggregating...")
@@ -737,6 +770,47 @@ def main():
         print("\n✓ SMATCH scores already computed. Loading...")
         pairwise_df = pd.read_csv(config.SMATCH_SCORES["pairwise"])
         aggregated_df = pd.read_csv(config.SMATCH_SCORES["aggregated"])
+    
+        df_answers = utils.load_answers()
+    #drop duplicates of vlms 
+    df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
+    
+    # --- traer ANSWER_I ---
+    df = pairwise_df.merge(
+        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+        left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
+        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+        how="left"
+    )
+
+    df = df.rename(columns={"ANSWER": "ANSWER_I"})
+    df = df.drop(columns=["AGENT"])
+
+    # --- traer ANSWER_J ---
+    df = df.merge(
+        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+        left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
+        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+        how="left"
+    )
+
+    df = df.rename(columns={"ANSWER": "ANSWER_J"})
+    df = df.drop(columns=["AGENT"])
+    
+    print(df.head())
+    
+    print("\nSample of pairwise scores with texts:")
+    sample_rows = df.head(10)
+    for _, row in sample_rows.iterrows():
+        print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['score']}")
+        print(f"  TEXT_A: {row['ANSWER_I']}")
+        print(f"  TEXT_B: {row['ANSWER_J']}")
+        print()
+        
+    #show samples with highest and lowest scores
+    print("\nSample of highest pairwise scores:")
+    sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="score", ascending=False).head(5)
+    print(sample_high)
     
     # Generate heatmaps
     generate_smatch_heatmaps(aggregated_df, pairwise_df)

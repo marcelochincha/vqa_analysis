@@ -478,7 +478,7 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
             # Create grouped legend: VLMs | GRUPO LIMA | GRUPO NYC
             all_handles = []
             all_labels = []
-            
+
             if handles_vlm:
                 all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ VLMs ━━━',
                                              markerfacecolor=config.PLOT_COLORS["VLM"], markersize=0, linestyle='None'))
@@ -486,7 +486,7 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
                 for h in handles_vlm:
                     all_handles.append(h)
                     all_labels.append(h.get_label())
-            
+
             if handles_lima:
                 all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ LIMA HUMANS ━━━',
                                              markerfacecolor=config.PLOT_COLORS["HUMAN_LIMA"], markersize=0, linestyle='None'))
@@ -494,7 +494,7 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
                 for h in handles_lima:
                     all_handles.append(h)
                     all_labels.append(h.get_label())
-            
+
             if handles_nyc:
                 all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ NYC HUMANS ━━━',
                                              markerfacecolor=config.PLOT_COLORS["HUMAN_NYC"], markersize=0, linestyle='None'))
@@ -502,7 +502,7 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
                 for h in handles_nyc:
                     all_handles.append(h)
                     all_labels.append(h.get_label())
-            
+
             ax.set_title(f"PCA - Block {block} - Videos {sector} (Q{(block-1)*5+1}-Q{block*5})", 
                         fontsize=config.PLOT_CONFIG["title_fontsize"], fontweight="bold")
             ax.set_xlabel(f"PC1 ({variance[0]:.1%})", fontsize=11)
@@ -526,6 +526,246 @@ def reduce_and_plot_pca_by_block(embeddings, df: pd.DataFrame) -> None:
             plt.close()
             
             print(f"  Saved: {os.path.basename(output_path)}")
+
+def reduce_and_plot_combined_pca(embeddings, df: pd.DataFrame) -> None:
+    """Create a combined PCA plot for both Lima and NYC regions."""
+    print("\n=== PCA Combined Plot (Lima + NYC) ===")
+
+    # Fit PCA with ALL videos (Lima + NYC)
+    pca = PCA(n_components=2, random_state=42)
+    embeddings_2d = pca.fit_transform(embeddings)
+    variance = pca.explained_variance_ratio_
+
+    # Plot with individual agent colors and markers
+    fig, ax = plt.subplots(figsize=(14, 10))
+
+    # Collect handles for grouped legend
+    handles_vlm = []
+    handles_lima = []
+    handles_nyc = []
+
+    # Plot VLMs (orange tones)
+    for agent in config.VLM_AGENTS:
+        if agent in df["AGENT"].values:
+            agent_mask = df["AGENT"] == agent
+            mask_array = agent_mask.values
+
+            scatter = ax.scatter(
+                embeddings_2d[mask_array, 0],
+                embeddings_2d[mask_array, 1],
+                color=config.PLOT_COLORS["VLM"],
+                marker=config.AGENT_MARKERS_MAP[agent],
+                label=agent,
+                alpha=0.7,
+                s=60,
+                edgecolors='black',
+                linewidth=0.5
+            )
+            handles_vlm.append(scatter)
+
+    # Plot Lima humans (light blue tones)
+    for agent in config.LIMA_AGENTS:
+        if agent in df["AGENT"].values:
+            agent_mask = df["AGENT"] == agent
+            mask_array = agent_mask.values
+            scatter = ax.scatter(
+                embeddings_2d[mask_array, 0],
+                embeddings_2d[mask_array, 1],
+                color=config.PLOT_COLORS["HUMAN_LIMA"],
+                marker=config.AGENT_MARKERS_MAP[agent],
+                label=agent,
+                alpha=0.7,
+                s=60,
+                edgecolors='black',
+                linewidth=0.5
+            )
+            handles_lima.append(scatter)
+
+    # Plot NYC humans (dark blue tones)
+    for agent in config.NYC_AGENTS:
+        if agent in df["AGENT"].values:
+            agent_mask = df["AGENT"] == agent
+            mask_array = agent_mask.values
+            scatter = ax.scatter(
+                embeddings_2d[mask_array, 0],
+                embeddings_2d[mask_array, 1],
+                color=config.PLOT_COLORS["HUMAN_NYC"],
+                marker=config.AGENT_MARKERS_MAP[agent],
+                label=agent,
+                alpha=0.7,
+                s=60,
+                edgecolors='black',
+                linewidth=0.5
+            )
+            handles_nyc.append(scatter)
+
+    # Create grouped legend: VLMs | GRUPO LIMA | GRUPO NYC
+    all_handles = []
+    all_labels = []
+
+    if handles_vlm:
+        all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ VLMs ━━━',
+                                     markerfacecolor=config.PLOT_COLORS["VLM"], markersize=0, linestyle='None'))
+        all_labels.append('━━━ VLMs ━━━')
+        for h in handles_vlm:
+            all_handles.append(h)
+            all_labels.append(h.get_label())
+
+    if handles_lima:
+        all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ LIMA HUMANS ━━━',
+                                     markerfacecolor=config.PLOT_COLORS["HUMAN_LIMA"], markersize=0, linestyle='None'))
+        all_labels.append('━━━ LIMA HUMANS ━━━')
+        for h in handles_lima:
+            all_handles.append(h)
+            all_labels.append(h.get_label())
+
+    if handles_nyc:
+        all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ NYC HUMANS ━━━',
+                                     markerfacecolor=config.PLOT_COLORS["HUMAN_NYC"], markersize=0, linestyle='None'))
+        all_labels.append('━━━ NYC HUMANS ━━━')
+        for h in handles_nyc:
+            all_handles.append(h)
+            all_labels.append(h.get_label())
+
+    ax.set_title(f"PCA - Combined Plot (Lima + NYC)", 
+                fontsize=config.PLOT_CONFIG["title_fontsize"], fontweight="bold")
+    ax.set_xlabel(f"PC1 ({variance[0]:.1%})", fontsize=11)
+    ax.set_ylabel(f"PC2 ({variance[1]:.1%})", fontsize=11)
+    ax.legend(all_handles, all_labels, loc="center left", bbox_to_anchor=(1, 0.5), 
+             frameon=True, fontsize=config.PLOT_CONFIG["legend_fontsize"], ncol=1)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    output_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "pca_combined_lima_nyc.png")
+    plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
+    plt.close()
+
+    print(f"  Saved: {os.path.basename(output_path)}")
+
+
+def reduce_and_plot_combined_pca_by_block(embeddings, df: pd.DataFrame) -> None:
+    """Create PCA plots combining Lima and NYC for each block."""
+    print("\n=== PCA Combined Plot by Block (Lima + NYC) ===")
+
+    for block in sorted(df["BLOCK"].unique()):
+        # Fit PCA for the current block with ALL videos (Lima + NYC)
+        block_mask = df["BLOCK"] == block
+        embeddings_block = embeddings[block_mask]
+        df_block = df[block_mask]
+
+        print(f"Block {block}: Fitting PCA with {len(df_block)} total samples")
+
+        pca = PCA(n_components=2, random_state=42)
+        embeddings_2d = pca.fit_transform(embeddings_block)
+        variance = pca.explained_variance_ratio_
+
+        # Plot with individual agent colors and markers
+        fig, ax = plt.subplots(figsize=(14, 10))
+
+        # Collect handles for grouped legend
+        handles_vlm = []
+        handles_lima = []
+        handles_nyc = []
+
+        # Plot VLMs (orange tones)
+        for agent in config.VLM_AGENTS:
+            if agent in df_block["AGENT"].values:
+                agent_mask = df_block["AGENT"] == agent
+                mask_array = agent_mask.values
+
+                scatter = ax.scatter(
+                    embeddings_2d[mask_array, 0],
+                    embeddings_2d[mask_array, 1],
+                    color=config.PLOT_COLORS["VLM"],
+                    marker=config.AGENT_MARKERS_MAP[agent],
+                    label=agent,
+                    alpha=0.7,
+                    s=60,
+                    edgecolors='black',
+                    linewidth=0.5
+                )
+                handles_vlm.append(scatter)
+
+        # Plot Lima humans (light blue tones)
+        for agent in config.LIMA_AGENTS:
+            if agent in df_block["AGENT"].values:
+                agent_mask = df_block["AGENT"] == agent
+                mask_array = agent_mask.values
+                scatter = ax.scatter(
+                    embeddings_2d[mask_array, 0],
+                    embeddings_2d[mask_array, 1],
+                    color=config.PLOT_COLORS["HUMAN_LIMA"],
+                    marker=config.AGENT_MARKERS_MAP[agent],
+                    label=agent,
+                    alpha=0.7,
+                    s=60,
+                    edgecolors='black',
+                    linewidth=0.5
+                )
+                handles_lima.append(scatter)
+
+        # Plot NYC humans (dark blue tones)
+        for agent in config.NYC_AGENTS:
+            if agent in df_block["AGENT"].values:
+                agent_mask = df_block["AGENT"] == agent
+                mask_array = agent_mask.values
+                scatter = ax.scatter(
+                    embeddings_2d[mask_array, 0],
+                    embeddings_2d[mask_array, 1],
+                    color=config.PLOT_COLORS["HUMAN_NYC"],
+                    marker=config.AGENT_MARKERS_MAP[agent],
+                    label=agent,
+                    alpha=0.7,
+                    s=60,
+                    edgecolors='black',
+                    linewidth=0.5
+                )
+                handles_nyc.append(scatter)
+
+        # Create grouped legend: VLMs | GRUPO LIMA | GRUPO NYC
+        all_handles = []
+        all_labels = []
+
+        if handles_vlm:
+            all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ VLMs ━━━',
+                                         markerfacecolor=config.PLOT_COLORS["VLM"], markersize=0, linestyle='None'))
+            all_labels.append('━━━ VLMs ━━━')
+            for h in handles_vlm:
+                all_handles.append(h)
+                all_labels.append(h.get_label())
+
+        if handles_lima:
+            all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ LIMA HUMANS ━━━',
+                                         markerfacecolor=config.PLOT_COLORS["HUMAN_LIMA"], markersize=0, linestyle='None'))
+            all_labels.append('━━━ LIMA HUMANS ━━━')
+            for h in handles_lima:
+                all_handles.append(h)
+                all_labels.append(h.get_label())
+
+        if handles_nyc:
+            all_handles.append(plt.Line2D([0], [0], marker='o', color='w', label='━━━ NYC HUMANS ━━━',
+                                         markerfacecolor=config.PLOT_COLORS["HUMAN_NYC"], markersize=0, linestyle='None'))
+            all_labels.append('━━━ NYC HUMANS ━━━')
+            for h in handles_nyc:
+                all_handles.append(h)
+                all_labels.append(h.get_label())
+
+        ax.set_title(f"PCA - Block {block} Combined (Lima + NYC)", 
+                    fontsize=config.PLOT_CONFIG["title_fontsize"], fontweight="bold")
+        ax.set_xlabel(f"PC1 ({variance[0]:.1%})", fontsize=11)
+        ax.set_ylabel(f"PC2 ({variance[1]:.1%})", fontsize=11)
+        ax.legend(all_handles, all_labels, loc="center left", bbox_to_anchor=(1, 0.5), 
+                 frameon=True, fontsize=config.PLOT_CONFIG["legend_fontsize"], ncol=1)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        output_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, f"pca_block{block}_combined.png")
+        plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
+        plt.close()
+
+        print(f"  Saved: {os.path.basename(output_path)}")
 
 
 def main(use_cache: bool = True, vlm_mode: str = "mean"):
@@ -559,19 +799,22 @@ def main(use_cache: bool = True, vlm_mode: str = "mean"):
     # Generate plots by block
     #reduce_and_plot_umap_by_block(embeddings, df)
     reduce_and_plot_pca_by_block(embeddings, df)
-    
+
+    # Generate combined PCA plots by block
+    reduce_and_plot_combined_pca_by_block(embeddings, df)
+
     print("\n" + "=" * 60)
     print("✓ Embedding analysis complete!")
-    print(f"✓ Generated 16 plots (4 blocks x 2 sectors x 2 methods) in: {config.OUTPUT_EMBEDDINGS_DIR}")
+    print(f"✓ Generated 20 plots (4 blocks x 2 sectors + 4 combined) in: {config.OUTPUT_EMBEDDINGS_DIR}")
     print("=" * 60)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Embedding analysis with UMAP and PCA")
     parser.add_argument("--no-cache", action="store_true", help="Disable embedding cache (regenerate)")
-    parser.add_argument("--mode", choices=["first", "mean"], default="mean", help="first or mean for VLM processing")
+    parser.add_argument("--vlm-mode", choices=["first", "mean"], default="first", help="first or mean for VLM processing")
     args = parser.parse_args()
     
-    main(use_cache=not args.no_cache, vlm_mode=args.mode)
+    main(use_cache=not args.no_cache, vlm_mode=args.vlm_mode)
 
 

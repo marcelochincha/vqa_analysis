@@ -49,6 +49,76 @@ def save_stsb_cache_by_pairs(cache: dict, cache_path: str) -> None:
     df.to_csv(cache_path, index=False)
 
 
+def migrate_legacy_pairwise_to_text_cache(legacy_pairwise_path: str, text_cache_path: str, df: pd.DataFrame) -> dict:
+    """Migrate legacy agent-based pairwise scores to text-pair cache.
+    
+    Reads the existing pairwise_stsb_scores.csv (agent pairs), matches with
+    the current CSV to get answer texts, and builds the text-pair cache.
+    This avoids re-computing scores that already exist.
+    """
+    print("\n--- Migrating legacy STSB pairwise scores to text-pair cache ---")
+    
+    if not os.path.exists(legacy_pairwise_path):
+        print("  No legacy pairwise file found")
+        return {}
+    
+    legacy_df = pd.read_csv(legacy_pairwise_path)
+    print(f"  Found {len(legacy_df):,} agent-pair scores in legacy file")
+    
+    # Normalize texts in current CSV
+    df["ANSWER_NORMALIZED"] = df["ANSWER"].apply(utils.normalize_text)
+    
+    # Build lookup: (agent, video, qnum) -> normalized text
+    answer_lookup = {}
+    for _, row in df.iterrows():
+        key = (row["AGENT"], row["VIDEO"], row["QUESTION_NUM"])
+        answer_lookup[key] = row["ANSWER_NORMALIZED"]
+    
+    # Convert agent pairs to text pairs
+    text_cache = {}
+    migrated = 0
+    skipped = 0
+    
+    for _, row in legacy_df.iterrows():
+        agent_i = row["AGENT_I"]
+        agent_j = row["AGENT_J"]
+        video = row["VIDEO"]
+        qnum = row["QUESTION_NUM"]
+        score = float(row["BERT_SCORE"])  # Legacy used BERT_SCORE column name
+        
+        # Look up the texts for this agent pair
+        key_i = (agent_i, video, qnum)
+        key_j = (agent_j, video, qnum)
+        
+        text_i = answer_lookup.get(key_i)
+        text_j = answer_lookup.get(key_j)
+        
+        if text_i is None or text_j is None:
+            skipped += 1
+            continue
+        
+        # Store with sorted tuple to handle (a,b) vs (b,a)
+        text_pair = tuple(sorted([text_i, text_j]))
+        
+        # Only store if not already present (first score wins for duplicates)
+        if text_pair not in text_cache:
+            text_cache[text_pair] = score
+            migrated += 1
+    
+    print(f"  Migrated {migrated:,} unique text-pair scores")
+    print(f"  Skipped {skipped:,} rows (agents not in current CSV)")
+    
+    dedup_saved = len(legacy_df) - len(text_cache)
+    if dedup_saved > 0:
+        print(f"  Deduplication saved {dedup_saved:,} redundant pairs ({dedup_saved/len(legacy_df)*100:.1f}%)")
+    
+    # Save migrated cache
+    save_stsb_cache_by_pairs(text_cache, text_cache_path)
+    print(f"  ✓ Saved text-pair cache: {os.path.basename(text_cache_path)}")
+    
+    return text_cache
+
+
 def compute_stsb_scores() -> pd.DataFrame:
     """Compute pairwise STSB-RoBERTa scores with text-pair deduplication and checkpointing.
     
@@ -97,9 +167,21 @@ def compute_stsb_scores() -> pd.DataFrame:
             agent_pair_key = (video, question_num, agent_i, agent_j)
             agent_pair_to_text_pair[agent_pair_key] = (text_i, text_j)
     
-    # Load existing cache
+    # Load or migrate cache
     cache_path = config.STSB_SCORES["stsb_cache_by_pairs"]
-    stsb_cache = load_stsb_cache_by_pairs(cache_path)
+    legacy_path = config.STSB_SCORES["pairwise"]
+    
+    # Check if we need to migrate from legacy
+    if not os.path.exists(cache_path) and os.path.exists(legacy_path):
+        print("\n" + "=" * 60)
+        print("LEGACY PAIRWISE FILE DETECTED")
+        print("=" * 60)
+        print("\nMigrating existing pairwise_stsb_scores.csv to text-pair cache...")
+        print("This will deduplicate scores and speed up future runs.")
+        stsb_cache = migrate_legacy_pairwise_to_text_cache(legacy_path, cache_path, df)
+        print("\n✓ Migration complete!\n")
+    else:
+        stsb_cache = load_stsb_cache_by_pairs(cache_path)
     
     # Find missing pairs
     missing_pairs = [p for p in needed_text_pairs if p not in stsb_cache]
@@ -107,7 +189,7 @@ def compute_stsb_scores() -> pd.DataFrame:
     # Handle self-comparisons
     self_pairs = [p for p in missing_pairs if p[0] == p[1]]
     for p in self_pairs:
-        stsb_cache[p] = 1.0
+        stsb_cache[p] = 1.0 #stbs should always be 1 for identical pairs but we can set it here to avoid unnecessary model calls
     missing_pairs = [p for p in missing_pairs if p[0] != p[1]]
     
     dedup_pct = (1 - len(needed_text_pairs) / total_agent_pairs) * 100 if total_agent_pairs else 0
@@ -151,6 +233,7 @@ def compute_stsb_scores() -> pd.DataFrame:
     # Phase 3: Expand to agent pairs
     print("\n--- Expanding to agent pairs ---")
     results = []
+    print(f"  Total agent pairs to process: {len(agent_pair_to_text_pair):,}")
     for (video, question_num, agent_i, agent_j), (text_i, text_j) in agent_pair_to_text_pair.items():
         text_pair = tuple(sorted([text_i, text_j]))
         score = stsb_cache.get(text_pair, 0.0)
@@ -170,14 +253,13 @@ def compute_stsb_scores() -> pd.DataFrame:
     
     return pairwise_df
 
-
 def aggregate_stsb_scores(pairwise_df: pd.DataFrame) -> pd.DataFrame:
     df = pairwise_df.copy()
         
     # Add block column
     utils.compute_blocks(df)
-    print(df.info())
-    # Aggregate by block and agent pair
+    #print(df.head())
+
     aggregated = df.groupby(['BLOCK', 'AGENT_I', 'AGENT_J'])["BERT_SCORE"].agg([
         ('MEAN_SCORE', 'mean'),
         ('COUNT', 'count'),
@@ -186,6 +268,8 @@ def aggregate_stsb_scores(pairwise_df: pd.DataFrame) -> pd.DataFrame:
         ('STD_SCORE', 'std'),
     ]).reset_index()
     
+    #show the block 2 mean scores
+    print("\nSample of aggregated scores (Block 2):")
     return aggregated
 
 
@@ -208,6 +292,7 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
         plot_similarity_heatmap(
             matrix,
             title=f"STSB-RoBERTa Similarity - Block {block}",
+            color_label="Similarity Score",
             output_path=similarity_path,
             cmap=cmap,  # Different colormap for STSB
             vmin=0.0,
@@ -223,11 +308,15 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
         
         #This is a little differnet since i dont need the matrix i need the pairwise scores to compute agreement percentages based on thresholds
         aggrement_matrix = create_agreement_matrix(pairwise_df, block, score_column="BERT_SCORE", threshold=0.5) # Using 0.5 as agreement threshold for STSB
-        plot_agreement_heatmap(
+        plot_similarity_heatmap(
             aggrement_matrix,
             title=f"STSB-RoBERTa Agreement - Block {block}",
+            color_label="Agreement (%)",
             output_path=agreement_path,
             cmap=cmap,
+            vmin=0,
+            vmax=100,
+            fmt="%d",
             use_group_colors=True
         )
     
@@ -275,6 +364,49 @@ def main():
             config.STSB_SCORES["pairwise"],
             config.STSB_SCORES["aggregated"]
         )
+    
+    #print some of the pairwise scores to verify the score showing the original TEXT_A and TEXT_B from the cache to verify the migration worked
+    print("\nSample of pairwise scores with original texts (from cache):")
+    #join the pairwise_df with the original answers
+    df_answers = utils.load_answers()
+    #drop duplicates of vlms 
+    df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
+    
+        # --- traer ANSWER_I ---
+    df = pairwise_df.merge(
+        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+        left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
+        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+        how="left"
+    )
+
+    df = df.rename(columns={"ANSWER": "ANSWER_I"})
+    df = df.drop(columns=["AGENT"])
+
+    # --- traer ANSWER_J ---
+    df = df.merge(
+        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+        left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
+        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+        how="left"
+    )
+
+    df = df.rename(columns={"ANSWER": "ANSWER_J"})
+    df = df.drop(columns=["AGENT"])
+    
+    
+    print("\nSample of pairwise scores with texts:")
+    sample_rows = df.head(10)
+    for _, row in sample_rows.iterrows():
+        print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['BERT_SCORE']}")
+        print(f"  TEXT_A: {row['ANSWER_I']}")
+        print(f"  TEXT_B: {row['ANSWER_J']}")
+        print()
+        
+    #show samples with highest and lowest scores
+    print("\nSample of highest pairwise scores:")
+    sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="BERT_SCORE", ascending=False).head(5)
+    print(sample_high)
     
     # Generate heatmaps
     generate_stsb_heatmaps(aggregated_df, pairwise_df)
