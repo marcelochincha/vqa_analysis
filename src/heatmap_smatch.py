@@ -6,7 +6,7 @@ from itertools import combinations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import amrlib
 from src import config, utils
-from src.heatmap_common import create_similarity_matrix, plot_similarity_heatmap, plot_agreement_heatmap, create_agreement_matrix
+from src.heatmap_common import create_similarity_matrix, plot_similarity_heatmap, create_agreement_matrix
 import tqdm
 
 def save_amr_cache(cache_dict: dict, cache_path: str) -> None:
@@ -614,52 +614,68 @@ def generate_smatch_heatmaps(aggregated_df: pd.DataFrame, pairwise_df: pd.DataFr
     from matplotlib.colors import LinearSegmentedColormap
     cmap = LinearSegmentedColormap.from_list("cmap", ["#ffffff", "#6be425"])
     
+    region_labels = {"both": "All", "lima": "Lima", "nyc": "NYC"}
+    total_plots = 0
+
     for block in range(1, config.NUM_BLOCKS + 1):
-        # Similarity heatmap (uses aggregated mean scores)
-        similarity_matrix = create_similarity_matrix(aggregated_df, block, score_column="MEAN_SCORE")
-        
-        similarity_path = os.path.join(
-            config.OUTPUT_SMATCH_PLOTS,
-            f"smatch_similarity_block{block}.png"
-        )
-        
-        plot_similarity_heatmap(
-            similarity_matrix,
-            title=f"SMATCH F1 Score - Block {block}",
-            color_label="Similarity Score",
-            output_path=similarity_path,
-            cmap=cmap,
-            vmin=0.0,
-            vmax=1.0,
-            use_group_colors=True
-        )
-        
-        # Agreement heatmap (uses pairwise scores with threshold)
-        agreement_matrix = create_agreement_matrix(
-            pairwise_df, 
-            block, 
-            score_column="score", 
-            threshold=0.5
-        )
-        
-        agreement_path = os.path.join(
-            config.OUTPUT_SMATCH_PLOTS,
-            f"smatch_agreement_block{block}.png"
-        )
-        
-        plot_similarity_heatmap(
-            agreement_matrix,
-            title=f"SMATCH F1 Score Agrement - Block {block}",
-            color_label="Agreement (%)",
-            output_path=agreement_path,
-            cmap=cmap,
-            vmin=0,
-            vmax=100,
-            fmt="%d",
-            use_group_colors=True
-        )
+        for region in ["both", "lima", "nyc"]:
+            # Similarity heatmap
+            similarity_matrix = create_similarity_matrix(
+                aggregated_df,
+                block,
+                score_column="score",
+                video_region=region,
+                pairwise_df=pairwise_df,
+            )
+
+            if region == "both":
+                similarity_path = os.path.join(config.OUTPUT_SMATCH_PLOTS, f"smatch_similarity_block{block}.png")
+            else:
+                similarity_path = os.path.join(config.OUTPUT_SMATCH_PLOTS, f"smatch_similarity_block{block}_{region}.png")
+
+            region_title = "" if region == "both" else f" ({region_labels[region]})"
+            plot_similarity_heatmap(
+                similarity_matrix,
+                title=f"SMATCH F1 Score - Block {block}{region_title}",
+                color_label="Similarity Score",
+                output_path=similarity_path,
+                cmap=cmap,
+                vmin=0.0,
+                vmax=1.0,
+                use_group_colors=True
+            )
+            if similarity_matrix is not None and not similarity_matrix.empty:
+                total_plots += 1
+
+            # Agreement heatmap
+            agreement_matrix = create_agreement_matrix(
+                pairwise_df,
+                block,
+                score_column="score",
+                threshold=0.5,
+                video_region=region,
+            )
+
+            if region == "both":
+                agreement_path = os.path.join(config.OUTPUT_SMATCH_PLOTS, f"smatch_agreement_block{block}.png")
+            else:
+                agreement_path = os.path.join(config.OUTPUT_SMATCH_PLOTS, f"smatch_agreement_block{block}_{region}.png")
+
+            plot_similarity_heatmap(
+                agreement_matrix,
+                title=f"SMATCH F1 Score Agrement - Block {block}{region_title}",
+                color_label="Agreement (%)",
+                output_path=agreement_path,
+                cmap=cmap,
+                vmin=0,
+                vmax=100,
+                fmt="%d",
+                use_group_colors=True
+            )
+            if agreement_matrix is not None and not agreement_matrix.empty:
+                total_plots += 1
     
-    print(f"✓ Generated {config.NUM_BLOCKS * 2} SMATCH heatmap plots")
+    print(f"✓ Generated {total_plots} SMATCH heatmap plots")
 
 
 def main():
@@ -770,47 +786,6 @@ def main():
         print("\n✓ SMATCH scores already computed. Loading...")
         pairwise_df = pd.read_csv(config.SMATCH_SCORES["pairwise"])
         aggregated_df = pd.read_csv(config.SMATCH_SCORES["aggregated"])
-    
-        df_answers = utils.load_answers()
-    #drop duplicates of vlms 
-    df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
-    
-    # --- traer ANSWER_I ---
-    df = pairwise_df.merge(
-        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-        left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
-        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-        how="left"
-    )
-
-    df = df.rename(columns={"ANSWER": "ANSWER_I"})
-    df = df.drop(columns=["AGENT"])
-
-    # --- traer ANSWER_J ---
-    df = df.merge(
-        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-        left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
-        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-        how="left"
-    )
-
-    df = df.rename(columns={"ANSWER": "ANSWER_J"})
-    df = df.drop(columns=["AGENT"])
-    
-    print(df.head())
-    
-    print("\nSample of pairwise scores with texts:")
-    sample_rows = df.head(10)
-    for _, row in sample_rows.iterrows():
-        print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['score']}")
-        print(f"  TEXT_A: {row['ANSWER_I']}")
-        print(f"  TEXT_B: {row['ANSWER_J']}")
-        print()
-        
-    #show samples with highest and lowest scores
-    print("\nSample of highest pairwise scores:")
-    sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="score", ascending=False).head(5)
-    print(sample_high)
     
     # Generate heatmaps
     generate_smatch_heatmaps(aggregated_df, pairwise_df)

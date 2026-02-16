@@ -36,15 +36,15 @@ def run_analysis(module_name: str, description: str):
     print("=" * 70)
     
     try:
-        if module_name == "heatmap_bert":
-            from src import heatmap_bert
-            heatmap_bert.main()
-        elif module_name == "heatmap_smatch":
+        if module_name == "heatmap_smatch":
             from src import heatmap_smatch
             heatmap_smatch.main()
         elif module_name == "heatmap_stsb":
             from src import heatmap_stsb
             heatmap_stsb.main()
+        elif module_name == "heatmap_embed":
+            from src import heatmap_embed
+            heatmap_embed.main()
         elif module_name == "embed_analysis":
             from src import embed_analysis
             embed_analysis.main()
@@ -92,9 +92,9 @@ def main():
     analyses = [
         ("embed_analysis", "Embedding Analysis (UMAP & PCA)"),
         ("bias_analysis", "Bias Analysis (VLMs vs Humans)"),
-        ("heatmap_bert", "BERT Score Heatmaps"),
         ("heatmap_smatch", "SMATCH Score Heatmaps (AMR-based)"),
         ("heatmap_stsb", "STSB-RoBERTa Score Heatmaps"),
+        ("heatmap_embed", "Embedding Cosine Similarity Heatmaps"),
     ]
     
     results = {}

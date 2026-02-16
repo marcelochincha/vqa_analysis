@@ -17,14 +17,6 @@ from matplotlib.colors import LinearSegmentedColormap
 from src import config, utils
 
 
-def extract_video_id(video_str: str) -> int:
-    """Extract numeric ID from video string (e.g., 'Robusto2_153' -> 153)."""
-    match = re.search(r'(\d+)$', str(video_str))
-    if match:
-        return int(match.group(1))
-    return 0
-
-
 def extract_ratings(df: pd.DataFrame) -> pd.DataFrame:
     """Extract numerical ratings from answer texts (Block 2: Q6-Q10 only)."""
     print("\n=== Extracting Ratings from Answers ===")
@@ -57,10 +49,12 @@ def extract_ratings(df: pd.DataFrame) -> pd.DataFrame:
     
     df_block2["rating"] = df_block2["ANSWER"].apply(extract_number)
     
-    # Extract video ID and add video_region column
-    df_block2["video_id"] = df_block2["VIDEO"].apply(extract_video_id)
-    df_block2["video_region"] = df_block2["video_id"].apply(
-        lambda x: "lima" if 1 <= x <= 100 else "nyc" if 101 <= x <= 200 else "unknown"
+    # Extract canonical video region columns
+    df_block2 = utils.add_video_region_columns(
+        df_block2,
+        video_col="VIDEO",
+        id_col="video_id",
+        region_col="video_region"
     )
     
     # Filter out rows without ratings

@@ -4,7 +4,7 @@ import pandas as pd
 from itertools import combinations
 from sentence_transformers import CrossEncoder
 from src import config, utils
-from src.heatmap_common import create_similarity_matrix, plot_similarity_heatmap, plot_agreement_heatmap, create_agreement_matrix
+from src.heatmap_common import create_similarity_matrix, plot_similarity_heatmap, create_agreement_matrix
 
 def load_stsb_model():
     """Load STSB-RoBERTa cross-encoder model."""
@@ -84,7 +84,7 @@ def migrate_legacy_pairwise_to_text_cache(legacy_pairwise_path: str, text_cache_
         agent_j = row["AGENT_J"]
         video = row["VIDEO"]
         qnum = row["QUESTION_NUM"]
-        score = float(row["BERT_SCORE"])  # Legacy used BERT_SCORE column name
+        score = float(row[""])  # Legacy used BERT_SCORE column name
         
         # Look up the texts for this agent pair
         key_i = (agent_i, video, qnum)
@@ -279,48 +279,67 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
     
     utils.ensure_output_dir(config.OUTPUT_STSB_PLOTS)
     
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list("cmap", ["#ffffff", "#ebb540"])
+    region_labels = {"both": "All", "lima": "Lima", "nyc": "NYC"}
+    total_plots = 0
+
     for block in range(1, config.NUM_BLOCKS + 1):
-        matrix = create_similarity_matrix(aggregated_df, block, score_column="MEAN_SCORE")
-        # Similarity heatmap
-        similarity_path = os.path.join(
-            config.OUTPUT_STSB_PLOTS,
-            f"stsb_similarity_block{block}.png"
-        )
-        from matplotlib.colors import LinearSegmentedColormap
-        cmap = LinearSegmentedColormap.from_list("cmap",["#ffffff", "#ebb540"])
-        
-        plot_similarity_heatmap(
-            matrix,
-            title=f"STSB-RoBERTa Similarity - Block {block}",
-            color_label="Similarity Score",
-            output_path=similarity_path,
-            cmap=cmap,  # Different colormap for STSB
-            vmin=0.0,
-            vmax=1.0,
-            use_group_colors=True
-        )
-        
-        # Agreement heatmap
-        agreement_path = os.path.join(
-            config.OUTPUT_STSB_PLOTS,
-            f"stsb_agreement_block{block}.png"
-        )
-        
-        #This is a little differnet since i dont need the matrix i need the pairwise scores to compute agreement percentages based on thresholds
-        aggrement_matrix = create_agreement_matrix(pairwise_df, block, score_column="BERT_SCORE", threshold=0.5) # Using 0.5 as agreement threshold for STSB
-        plot_similarity_heatmap(
-            aggrement_matrix,
-            title=f"STSB-RoBERTa Agreement - Block {block}",
-            color_label="Agreement (%)",
-            output_path=agreement_path,
-            cmap=cmap,
-            vmin=0,
-            vmax=100,
-            fmt="%d",
-            use_group_colors=True
-        )
+        for region in ["both", "lima", "nyc"]:
+            matrix = create_similarity_matrix(
+                aggregated_df,
+                block,
+                score_column="BERT_SCORE",
+                video_region=region,
+                pairwise_df=pairwise_df,
+            )
+
+            if region == "both":
+                similarity_path = os.path.join(config.OUTPUT_STSB_PLOTS, f"stsb_similarity_block{block}.png")
+            else:
+                similarity_path = os.path.join(config.OUTPUT_STSB_PLOTS, f"stsb_similarity_block{block}_{region}.png")
+
+            region_title = "" if region == "both" else f" ({region_labels[region]})"
+            plot_similarity_heatmap(
+                matrix,
+                title=f"STSB-RoBERTa Similarity - Block {block}{region_title}",
+                color_label="Similarity Score",
+                output_path=similarity_path,
+                cmap=cmap,
+                vmin=0.0,
+                vmax=1.0,
+                use_group_colors=True
+            )
+            if matrix is not None and not matrix.empty:
+                total_plots += 1
+
+            if region == "both":
+                agreement_path = os.path.join(config.OUTPUT_STSB_PLOTS, f"stsb_agreement_block{block}.png")
+            else:
+                agreement_path = os.path.join(config.OUTPUT_STSB_PLOTS, f"stsb_agreement_block{block}_{region}.png")
+
+            aggrement_matrix = create_agreement_matrix(
+                pairwise_df,
+                block,
+                score_column="BERT_SCORE",
+                threshold=0.5,
+                video_region=region,
+            )
+            plot_similarity_heatmap(
+                aggrement_matrix,
+                title=f"STSB-RoBERTa Agreement - Block {block}{region_title}",
+                color_label="Agreement (%)",
+                output_path=agreement_path,
+                cmap=cmap,
+                vmin=0,
+                vmax=100,
+                fmt="%d",
+                use_group_colors=True
+            )
+            if aggrement_matrix is not None and not aggrement_matrix.empty:
+                total_plots += 1
     
-    print(f"✓ Generated {config.NUM_BLOCKS * 2} STSB-RoBERTa heatmap plots")
+    print(f"✓ Generated {total_plots} STSB-RoBERTa heatmap plots")
 
 
 def main():
@@ -365,48 +384,48 @@ def main():
             config.STSB_SCORES["aggregated"]
         )
     
-    #print some of the pairwise scores to verify the score showing the original TEXT_A and TEXT_B from the cache to verify the migration worked
-    print("\nSample of pairwise scores with original texts (from cache):")
-    #join the pairwise_df with the original answers
-    df_answers = utils.load_answers()
-    #drop duplicates of vlms 
-    df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
+    # #print some of the pairwise scores to verify the score showing the original TEXT_A and TEXT_B from the cache to verify the migration worked
+    # print("\nSample of pairwise scores with original texts (from cache):")
+    # #join the pairwise_df with the original answers
+    # df_answers = utils.load_answers()
+    # #drop duplicates of vlms 
+    # df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
     
-        # --- traer ANSWER_I ---
-    df = pairwise_df.merge(
-        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-        left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
-        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-        how="left"
-    )
+    #     # --- traer ANSWER_I ---
+    # df = pairwise_df.merge(
+    #     df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+    #     left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
+    #     right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+    #     how="left"
+    # )
 
-    df = df.rename(columns={"ANSWER": "ANSWER_I"})
-    df = df.drop(columns=["AGENT"])
+    # df = df.rename(columns={"ANSWER": "ANSWER_I"})
+    # df = df.drop(columns=["AGENT"])
 
-    # --- traer ANSWER_J ---
-    df = df.merge(
-        df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-        left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
-        right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-        how="left"
-    )
+    # # --- traer ANSWER_J ---
+    # df = df.merge(
+    #     df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
+    #     left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
+    #     right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
+    #     how="left"
+    # )
 
-    df = df.rename(columns={"ANSWER": "ANSWER_J"})
-    df = df.drop(columns=["AGENT"])
+    # df = df.rename(columns={"ANSWER": "ANSWER_J"})
+    # df = df.drop(columns=["AGENT"])
     
     
-    print("\nSample of pairwise scores with texts:")
-    sample_rows = df.head(10)
-    for _, row in sample_rows.iterrows():
-        print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['BERT_SCORE']}")
-        print(f"  TEXT_A: {row['ANSWER_I']}")
-        print(f"  TEXT_B: {row['ANSWER_J']}")
-        print()
+    # print("\nSample of pairwise scores with texts:")
+    # sample_rows = df.head(10)
+    # for _, row in sample_rows.iterrows():
+    #     print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['BERT_SCORE']}")
+    #     print(f"  TEXT_A: {row['ANSWER_I']}")
+    #     print(f"  TEXT_B: {row['ANSWER_J']}")
+    #     print()
         
-    #show samples with highest and lowest scores
-    print("\nSample of highest pairwise scores:")
-    sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="BERT_SCORE", ascending=False).head(5)
-    print(sample_high)
+    # #show samples with highest and lowest scores
+    # print("\nSample of highest pairwise scores:")
+    # sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="BERT_SCORE", ascending=False).head(5)
+    # print(sample_high)
     
     # Generate heatmaps
     generate_stsb_heatmaps(aggregated_df, pairwise_df)

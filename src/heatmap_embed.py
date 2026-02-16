@@ -5,9 +5,10 @@ import sys
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
-from src.heatmap_common import plot_similarity_heatmap, create_agreement_matrix, plot_agreement_heatmap
+from src.heatmap_common import plot_similarity_heatmap, create_agreement_matrix
 from src import config, utils
 import argparse
+from itertools import combinations
 from tqdm import tqdm
 from sklearn.decomposition import PCA
 
@@ -19,61 +20,119 @@ def check_embedding_cache(cache_path):
         print("\n⚠ Embedding cache not found! Please run `embed_analysis.py` to generate embeddings first.\n")
         sys.exit(1)
 
-def compute_cosine_similarity(embeddings):
-    """Compute pairwise cosine similarity from embeddings."""
-    # Cosine similarity is 1 - cosine distance
-    similarity_matrix = 1 - cdist(embeddings, embeddings, metric="cosine")
-    return pd.DataFrame(similarity_matrix)
-
-def generate_cosine_similarity_heatmaps(embeddings, metadata):
+def generate_score_similarity_heatmaps(metadata):
     """Generate heatmaps for cosine similarity by block."""
     output_dir = config.OUTPUT_EMBEDDINGS_DIR
     utils.ensure_output_dir(output_dir)
+    region_labels = {"both": "All", "lima": "Lima", "nyc": "NYC"}
+
+    # Generate color map
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list("cmap", ["#ffffff", "#963fc9"])
+
+    metadata = metadata.copy()
+    if "VIDEO_REGION" not in metadata.columns:
+        metadata["VIDEO_REGION"] = metadata["VIDEO"].apply(utils.infer_video_region)
 
     for block in sorted(metadata["BLOCK"].unique()):
-        block_mask = metadata["BLOCK"] == block
-        block_embeddings = embeddings[block_mask]
-        block_metadata = metadata[block_mask]
+        for region in ["both", "lima", "nyc"]:
+            block_mask = metadata["BLOCK"] == block
+            if region != "both":
+                block_mask = block_mask & (metadata["VIDEO_REGION"] == region)
 
-        # Compute cosine similarity
-        similarity_matrix = compute_cosine_similarity(block_embeddings)
-        similarity_matrix.index = block_metadata["AGENT"].values
-        similarity_matrix.columns = block_metadata["AGENT"].values
+            block_metadata = metadata[block_mask]
+            if len(block_metadata) < 1:
+                print(f"⚠ No embedding rows for block={block}, region={region}")
+                continue
+            
+            df_avg = (
+                block_metadata
+                .groupby(["AGENT_I", "AGENT_J"], as_index=False)
+                .SCORE.mean()
+            )
+            
+            matrix = df_avg.pivot(
+                index="AGENT_I",
+                columns="AGENT_J",
+                values="SCORE"
+            )
+            #now pivot? or just compute pairwise cosine similarity for this block and region?
+            # Plot similarity heatmap
+            if region == "both":
+                similarity_path = os.path.join(output_dir, f"cosine_score_block{block}.png")
+            else:
+                similarity_path = os.path.join(output_dir, f"cosine_score_block{block}_{region}.png")
 
-        # Plot similarity heatmap
-        similarity_path = os.path.join(output_dir, f"cosine_similarity_block{block}.png")
-        plot_similarity_heatmap(
-            similarity_matrix,
-            title=f"Cosine Similarity - Block {block}",
-            output_path=similarity_path,
-            cmap="RdYlGn",
-            vmin=0.0,
-            vmax=1.0
-        )
+            region_title = "" if region == "both" else f" ({region_labels[region]})"
+            plot_similarity_heatmap(
+                matrix,
+                title=f"Cosine Score Similarity - Block {block}{region_title}",
+                color_label="Cosine Similarity",
+                output_path=similarity_path,
+                cmap=cmap,
+                vmin=0.0,
+                vmax=1.0
+            )
+            
+            # Agreement heatmap
+            agreement_matrix = create_agreement_matrix(
+                block_metadata,
+                block,
+                score_column="SCORE",
+                threshold=0.5,
+                video_region=region,
+            )
 
-def generate_cosine_agreement_heatmaps(pairwise_df: pd.DataFrame, metadata: pd.DataFrame):
-    """Generate agreement heatmaps for cosine similarity by block."""
-    output_dir = config.OUTPUT_EMBEDDINGS_DIR
-    utils.ensure_output_dir(output_dir)
+            if region == "both":
+                agreement_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, f"cosine_agreement_block{block}.png")
+            else:
+                agreement_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, f"cosine_agreement_block{block}_{region}.png")
 
-    for block in sorted(metadata["BLOCK"].unique()):
-        # Compute agreement matrix
-        agreement_matrix = create_agreement_matrix(
-            pairwise_df,
-            block,
-            score_column="COSINE_SCORE",
-            threshold=0.5  # Example threshold for agreement
-        )
+            plot_similarity_heatmap(
+                agreement_matrix,
+                title=f"Cosine Score Agreement - Block {block}{region_title}",
+                color_label="Agreement (%)",
+                output_path=agreement_path,
+                cmap=cmap,
+                vmin=0,
+                vmax=100,
+                fmt="%d",
+                use_group_colors=True
+            )
 
-        # Plot agreement heatmap
-        agreement_path = os.path.join(output_dir, f"cosine_agreement_block{block}.png")
-        plot_agreement_heatmap(
-            agreement_matrix,
-            title=f"Cosine Agreement - Block {block}",
-            output_path=agreement_path,
-            cmap="RdYlGn",
-            use_group_colors=True
-        )
+# def generate_cosine_agreement_heatmaps(pairwise_df: pd.DataFrame, metadata: pd.DataFrame):
+#     """Generate agreement heatmaps for cosine similarity by block."""
+#     output_dir = config.OUTPUT_EMBEDDINGS_DIR
+#     utils.ensure_output_dir(output_dir)
+#     region_labels = {"both": "All", "lima": "Lima", "nyc": "NYC"}
+
+#     for block in sorted(metadata["BLOCK"].unique()):
+#         for region in ["both", "lima", "nyc"]:
+#             try:
+#                 agreement_matrix = create_agreement_matrix(
+#                     pairwise_df,
+#                     block,
+#                     score_column="COSINE_SCORE",
+#                     threshold=0.5,
+#                     video_region=region,
+#                 )
+#             except ValueError as exc:
+#                 print(f"⚠ Skipping cosine agreement for block={block}, region={region}: {exc}")
+#                 continue
+
+#             if region == "both":
+#                 agreement_path = os.path.join(output_dir, f"cosine_agreement_block{block}.png")
+#             else:
+#                 agreement_path = os.path.join(output_dir, f"cosine_agreement_block{block}_{region}.png")
+
+#             region_title = "" if region == "both" else f" ({region_labels[region]})"
+#             plot_agreement_heatmap(
+#                 agreement_matrix,
+#                 title=f"Cosine Agreement - Block {block}{region_title}",
+#                 output_path=agreement_path,
+#                 cmap="RdYlGn",
+#                 use_group_colors=True
+#             )
 
 def process_vlm_embeddings(embeddings: np.ndarray, metadata: pd.DataFrame, mode: str = "mean", max_workers: int = 4) -> tuple:
     """Process VLM embeddings to handle multiple responses per question.
@@ -124,6 +183,9 @@ def process_vlm_embeddings(embeddings: np.ndarray, metadata: pd.DataFrame, mode:
     combined_embeddings = np.vstack([human_embeddings, vlm_embeddings])
     combined_metadata = pd.concat([human_metadata, vlm_metadata], ignore_index=True)
 
+    print(f"Processed VLM embeddings using mode '{mode}': {len(vlm_metadata)} unique (VIDEO, QUESTION_NUM, AGENT) entries")
+    print(f"Combined dataset: {len(combined_metadata)} total entries (Humans: {len(human_metadata)}, VLMs: {len(vlm_metadata)})")
+
     return combined_embeddings, combined_metadata
 
 def apply_pca(embeddings, variance_ratio=0.95):
@@ -133,29 +195,6 @@ def apply_pca(embeddings, variance_ratio=0.95):
     print(f"PCA applied: Reduced dimensions to {reduced_embeddings.shape[1]} components.")
     return reduced_embeddings
 
-from sklearn.metrics import pairwise_distances
-def compute_pairwise_scores(embeddings, metadata, max_workers=1):
-    """Compute pairwise cosine similarity scores using multithreading with tqdm progress."""
-    print("=" * 50)
-    print("Computing pairwise cosine similarity scores...")
-    print("Emebeddings shape:", embeddings.shape)
-    print("Metadata shape:", metadata.shape)
-    print(f"Using up to {max_workers} workers for parallel computation...")
-    print("=" * 50)
-    pairwise_distances_list = 1 - pairwise_distances(embeddings, metric="cosine",n_jobs=max_workers)
-    print(f"✓ Pairwise scores computed for {len(metadata)} agents ({len(pairwise_distances_list)**2} pairs)")
-    #use blas from numpy efficenly
-
-    #print("\nComputing pairwise cosine similarity scores with multithreading...")
-    #import concurrent
-    #with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-    #    futures = {executor.submit(compute_score, i, row_i, metadata, embeddings): i for i, row_i in metadata.iterrows()}
-    #    with tqdm(total=len(futures), desc="Rows processed") as pbar:
-    #        for future in as_completed(futures):
-    #            pairwise_scores.extend(future.result())
-    #            pbar.update(1)
-
-    return pd.DataFrame(pairwise_distances_list)
 
 def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path, max_workers=4):
     """Compute pairwise cosine similarity scores with incremental caching.
@@ -179,36 +218,80 @@ def compute_pairwise_scores_with_cache(embeddings, metadata, cache_path, max_wor
         
         print(f"  \u26a1 Detected {len(new_agents)} new agent(s): {sorted(new_agents)}")
         print(f"  Computing only pairs involving new agents...")
+    else:
+        print(f"\nNo cache found at {cache_path} — computing all pairwise scores...")
+        new_agents = set(metadata["AGENT"].unique())
     
     # If no cache or new agents detected, compute missing pairs
     # For simplicity with the embedding-based approach, compute all if no cache
-    if existing_df is None:
-        print(metadata)
-        pairwise_scores = compute_pairwise_scores(embeddings, metadata)
-    else:
-        # Only compute pairs involving at least one new agent
-        new_scores = []
-        for i, row_i in metadata.iterrows():
-            for j, row_j in metadata.iterrows():
-                if i >= j:
-                    continue
-                # Skip if both agents are already cached
-                if row_i["AGENT"] not in new_agents and row_j["AGENT"] not in new_agents:
-                    continue
-                score = 1 - cdist([embeddings[i]], [embeddings[j]], metric="cosine")[0][0]
-                new_scores.append({
-                    "BLOCK": row_i["BLOCK"],
-                    "AGENT_I": row_i["AGENT"],
-                    "AGENT_J": row_j["AGENT"],
-                    "COSINE_SCORE": score
-                })
+    print(f"\nComputing pairwise scores for new agents only...")
+    total_agent_pairs = 0
+    # Only compute pairs involving at least one new agent
+    agents = utils.get_agent_groups()["all"]
+    to_compute = []
+    #drop duplicates for video agent and question num
+    for (video, question_num), group in tqdm(
+        metadata.groupby(["VIDEO", "QUESTION_NUM"]),
+        total=metadata.groupby(["VIDEO", "QUESTION_NUM"]).ngroups
+    ):
+        available_agents = group["AGENT"].unique()
+        for agent_i, agent_j in combinations(agents, 2):
+            if agent_i not in available_agents or agent_j not in available_agents:
+                continue
+            total_agent_pairs += 1
+            to_compute.append({
+                "VIDEO": video,
+                "QUESTION_NUM": question_num,
+                "AGENT_I": agent_i,
+                "AGENT_J": agent_j,
+                "BLOCK": group["BLOCK"].iloc[0],
+            })
+
+    #convert to dataframe for easier processing
+    to_compute_df = pd.DataFrame(to_compute)
+    #now compute cosine similarity for these pairs using the index to get the embeddings
+    new_scores = []
+    for _, row in tqdm(to_compute_df.iterrows(), total=len(to_compute_df), desc="Computing new pairwise scores"):
+        emb_i = embeddings[(row["AGENT_I"], row["VIDEO"], row["QUESTION_NUM"] )]
+        emb_j = embeddings[(row["AGENT_J"], row["VIDEO"], row["QUESTION_NUM"] )]
+        cosine_score = 1 - cdist([emb_i], [emb_j], metric="cosine")[0][0]
+        new_scores.append({
+            "VIDEO": row["VIDEO"],
+            "QUESTION_NUM": row["QUESTION_NUM"],
+            "AGENT_I": row["AGENT_I"],
+            "AGENT_J": row["AGENT_J"],
+            "BLOCK": row["BLOCK"],
+            "SCORE": cosine_score
+        })
         
-        if new_scores:
-            new_df = pd.DataFrame(new_scores)
-            pairwise_scores = pd.concat([existing_df, new_df], ignore_index=True)
-            print(f"  Added {len(new_scores)} new pair scores")
-        else:
-            pairwise_scores = existing_df
+        #also add the reverse pair for symmetry
+        new_scores.append({
+            "VIDEO": row["VIDEO"],
+            "QUESTION_NUM": row["QUESTION_NUM"],
+            "AGENT_I": row["AGENT_J"],
+            "AGENT_J": row["AGENT_I"],
+            "BLOCK": row["BLOCK"],
+            "SCORE": cosine_score
+        })
+        
+    #nopw add the score with same using agents
+    for agent in agents:
+        for video, question_num in metadata.groupby(["VIDEO", "QUESTION_NUM"]).groups.keys():
+            if (agent, video, question_num) not in embeddings:
+                continue
+            new_scores.append({
+                "VIDEO": video,
+                "QUESTION_NUM": question_num,
+                "AGENT_I": agent,
+                "AGENT_J": agent,
+                "BLOCK": metadata[(metadata["VIDEO"] == video) & (metadata["QUESTION_NUM"] == question_num)]["BLOCK"].iloc[0],
+                "SCORE": 1.0
+            })
+            
+
+    new_df = pd.DataFrame(new_scores)
+    pairwise_scores = pd.concat([existing_df, new_df], ignore_index=True)
+    print(f"  Added {len(new_scores)} new pair scores")
     
     # Save to cache
     print(f"\nSaving pairwise scores to cache at {cache_path}...")
@@ -236,9 +319,8 @@ def main():
     check_embedding_cache(None)
 
     # Load embeddings via the keyed cache (aligns to current CSV)
+    
     metadata = utils.load_answers()
-
-    # Try keyed cache first, fall back to legacy .npy
     keyed_path = config.EMBEDDING_CACHE["keyed"]
     legacy_path = config.EMBEDDING_CACHE["legacy_npy"]
 
@@ -253,6 +335,9 @@ def main():
             print(f"  ⚠ {len(missing)} rows missing from keyed cache — run embed_analysis.py first")
             sys.exit(1)
         embeddings = np.vstack([cache[k] for k in keys])
+        dict_embeddings = {k: cache[k] for k in keys}  # For easy lookup by (VIDEO, QUESTION_NUM, AGENT)
+        print(f"✓ Loaded embeddings from keyed cache: {keyed_path} with {len(cache)} entries")
+        #print(keys)
     else:
         embeddings = np.load(legacy_path)
 
@@ -270,13 +355,10 @@ def main():
 
     # Compute pairwise cosine similarity scores with caching
     pairwise_cache_path = os.path.join(config.OUTPUT_EMBEDDINGS_DIR, "pairwise_scores_cache.csv")
-    pairwise_df = compute_pairwise_scores_with_cache(embeddings, metadata, pairwise_cache_path, max_workers=args.max_workers)
+    pairwise_df = compute_pairwise_scores_with_cache(dict_embeddings, metadata, pairwise_cache_path, max_workers=args.max_workers)
 
     # Generate similarity heatmaps
-    generate_cosine_similarity_heatmaps(embeddings, metadata)
-
-    # Generate agreement heatmaps
-    generate_cosine_agreement_heatmaps(pairwise_df, metadata)
+    generate_score_similarity_heatmaps(pairwise_df)
 
     print("\n✓ Cosine similarity and agreement heatmap analysis complete!\n")
 

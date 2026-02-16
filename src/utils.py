@@ -167,6 +167,61 @@ def compute_blocks(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def extract_video_id(video_value) -> int:
+    """Extract trailing numeric ID from VIDEO value.
+
+    Examples
+    --------
+    Robusto2_153 -> 153
+    video_009 -> 9
+    malformed -> 0
+    """
+    match = re.search(r"(\d+)$", str(video_value))
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except Exception:
+        return 0
+
+
+def map_video_region(video_id: int) -> str:
+    """Map video ID to region using canonical thresholds.
+
+    1-100 => lima
+    101-200 => nyc
+    else => unknown
+    """
+    if 1 <= video_id <= 100:
+        return "lima"
+    if 101 <= video_id <= 200:
+        return "nyc"
+    return "unknown"
+
+
+def infer_video_region(video_value) -> str:
+    """Infer video region label from a VIDEO field value."""
+    return map_video_region(extract_video_id(video_value))
+
+
+def add_video_region_columns(
+    df: pd.DataFrame,
+    video_col: str = "VIDEO",
+    id_col: str = "VIDEO_NUM",
+    region_col: str = "VIDEO_REGION",
+) -> pd.DataFrame:
+    """Return dataframe with standardized video id and region columns added."""
+    result = df.copy()
+    if video_col not in result.columns:
+        result[id_col] = 0
+        result[region_col] = "unknown"
+        return result
+
+    result[id_col] = result[video_col].apply(extract_video_id)
+    result[region_col] = result[id_col].apply(map_video_region)
+    return result
+
+
 def aggregate_scores_by_block(pairwise_df: pd.DataFrame, score_column: str = "score") -> pd.DataFrame:
     """Aggregate pairwise scores by blocks.
     

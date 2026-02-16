@@ -172,9 +172,9 @@ def process_vlm_embeddings(embeddings: np.ndarray, df: pd.DataFrame, mode: str =
     # Add block info
     df = utils.compute_blocks(df)
     
-    # Add video sector (Lima: <=100, NYC: >100)
-    df['VIDEO_NUM'] = df['VIDEO'].str.extract(r'_(\d+)$')[0].astype(int)
-    df['VIDEO_SECTOR'] = df['VIDEO_NUM'].apply(lambda x: 'Lima' if x <= 100 else 'NYC')
+    # Add canonical video region columns
+    df = utils.add_video_region_columns(df, video_col="VIDEO", id_col="VIDEO_NUM", region_col="VIDEO_REGION")
+    df['VIDEO_SECTOR'] = df['VIDEO_REGION'].map({"lima": "Lima", "nyc": "NYC"}).fillna("Unknown")
     
     # Separate humans and VLMs (use dynamic detection)
     human_mask = df["AGENT"].str.startswith("human_")
