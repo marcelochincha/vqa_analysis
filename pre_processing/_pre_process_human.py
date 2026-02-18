@@ -69,11 +69,6 @@ def process_humans(
     long['VIDEO'] = long['VIDEO_RAW'].astype(str).str.replace(r'^R2_', 'Robusto2_', regex=True)
 
     # load question strings
-    def resolve_question(row):
-        qn = int(row['QUESTION_NUM']) if pd.notna(row['QUESTION_NUM']) else None
-        return f"Q{qn}"
-
-    long['QUESTION'] = long.apply(resolve_question, axis=1)
 
     # Normalize ANSWER
     long['ANSWER'] = long['ANSWER'].astype(str).str.strip()
@@ -87,10 +82,7 @@ def process_humans(
     long.loc[missing_mask, 'ANSWER'] = placeholder_missing
 
     # select required columns and dedupe
-    out = long[['AGENT', 'VIDEO', 'QUESTION_NUM', 'QUESTION', 'ANSWER']].drop_duplicates(
-        subset=['AGENT', 'VIDEO', 'QUESTION_NUM'], keep='first'
-    )
-
+    out = long[['AGENT', 'VIDEO', 'QUESTION_NUM', 'ANSWER']]
     out.to_csv(out_csv, index=False)
     summary = {
         'rows_input': int(df.shape[0]),

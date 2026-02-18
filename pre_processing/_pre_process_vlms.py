@@ -66,32 +66,27 @@ def process_vlms(vlm_dir: Path, out_csv: Path, expected: int = 20, placeholder: 
             video = normalize_text(obj.get('video') or '')
             qraw = obj.get('question')
             qnum = parse_qnum(qraw)
-            question_label = f"Q{qnum}" if qnum else 'Qn'
-
             responses = obj.get('response') or obj.get('responses') or []
             if not isinstance(responses, (list, tuple)):
                 responses = [responses]
 
             if len(responses) > expected:
                 logger.warning('%s: %s Q%s has %d responses, truncating to %d', agent, video, qnum, len(responses), expected)
-                responses = responses[:expected]
+                responses = responses[-expected:]
+                print(f"Truncated responses for {agent} {video} Q{qnum} to last {expected} now got : {len(responses)}")
                 stats['truncated'] += 1
             if len(responses) < expected:
                 logger.error('%s: %s Q%s has only %d responses, padding to %d with placeholder', agent, video, qnum, len(responses), expected)
                 raise RuntimeError(f"{agent} {video} Q{qnum} has only {len(responses)} responses, expected {expected}")
-                pad_n = expected - len(responses)
-                responses = list(responses) + [placeholder] * pad_n
-                stats['padded'] += 1
-
             for idx, resp in enumerate(responses, start=1):
                 ans = normalize_text(resp)
                 if ans == '':
                     ans = placeholder
                     stats['missing_filled'] += 1
-                rows.append({'AGENT': agent, 'VIDEO': video, 'QUESTION_NUM': qnum, 'QUESTION': question_label, 'ANSWER': ans})
+                rows.append({'AGENT': agent, 'VIDEO': video, 'QUESTION_NUM': qnum, 'ANSWER': ans})
                 stats['total_rows'] += 1
 
-    df = pd.DataFrame(rows, columns=['AGENT', 'VIDEO', 'QUESTION_NUM', 'QUESTION', 'ANSWER'])
+    df = pd.DataFrame(rows, columns=['AGENT', 'VIDEO', 'QUESTION_NUM', 'ANSWER'])
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False, encoding='utf-8')
     logger.info('Wrote %d rows for %d agents to %s', len(df), stats['agents'], out_csv)
