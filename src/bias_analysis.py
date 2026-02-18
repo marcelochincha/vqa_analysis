@@ -36,6 +36,7 @@ def extract_ratings(df: pd.DataFrame) -> pd.DataFrame:
             r'(\d+\.?\d*)\s*(?:out of|/)\s*\d+',
             r'^(\d+\.?\d*)',
             r'(\d+\.?\d*)'
+            r'(\d+\.)' #
         ]
         
         for pattern in patterns:
@@ -158,7 +159,7 @@ def get_region_colormap(region: str):
     # grayscale for everyone
     #use config plot colors for video regions
     return LinearSegmentedColormap.from_list(
-        f"olormap",
+        f"Colormap",
         [config.PLOT_COLORS["BASE"], config.PLOT_COLORS["OTHER"]],
     )
     
@@ -381,6 +382,35 @@ def plot_bias_heatmap_avg_per_question(bias_df: pd.DataFrame, human_region: str,
 
     print(f"✓ Saved: {os.path.basename(output_path)}")
 
+def plot_bias_score_distributions(bias_df_lima: pd.DataFrame, bias_df_nyc: pd.DataFrame, output_dir: str) -> None:
+    """
+    Plot distribution of bias scores for Lima and NYC human regions.
+
+    Args:
+        bias_df_lima: DataFrame with bias scores for Lima humans
+        bias_df_nyc: DataFrame with bias scores for NYC humans
+        output_dir: Directory to save plots
+    """
+    print("\n=== Plotting Bias Score Distributions ===")
+    
+    combined = pd.concat([
+        bias_df_lima.assign(human_region="Lima"),
+        bias_df_nyc.assign(human_region="NYC")
+    ], ignore_index=True)
+    
+    plt.figure(figsize=(10, 6))
+    sns.violinplot(x="human_region", y="avg_bias_sign", data=combined, palette=[config.PLOT_COLORS["HUMAN_LIMA"], config.PLOT_COLORS["HUMAN_NYC"]])
+    plt.title("Distribution of Average Bias Signs by Human Region", fontsize=config.PLOT_CONFIG["title_fontsize"], fontweight='bold')
+    plt.xlabel("Human Region", fontsize=12)
+    plt.ylabel("Average Bias Sign\n(-1=underestimate, +1=overestimate)", fontsize=12)
+    
+    output_path = os.path.join(output_dir, "bias_score_distribution.png")
+    utils.ensure_output_dir(output_dir)
+    plt.savefig(output_path, dpi=config.PLOT_CONFIG["dpi"], bbox_inches="tight")
+    plt.close()
+    
+    print(f"✓ Saved: {os.path.basename(output_path)}")
+
 def main():
     # After all individual plots, create unified grid
     #plot_all_heatmaps_grid(config.OUTPUT_BIAS_DIR)
@@ -444,63 +474,42 @@ def main():
         utils.ensure_output_dir(os.path.dirname(cache_path))
         combined.to_csv(cache_path, index=False)
         print(f"✓ Cached bias scores: {cache_path}")
-        
-        # Plot
-        for q in [6, 7, 8, 9, 10]:
-            plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
-        for q in [6, 7, 8, 9, 10]:
-            plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
-        
-        # Generate average heatmaps per question
-        plot_bias_heatmap_avg_per_question(bias_df_lima, human_region="lima", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
-        plot_bias_heatmap_avg_per_question(bias_df_nyc, human_region="nyc", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
     else:
         # Use cached data for plotting
         bias_df_lima = cached_bias[cached_bias["human_region"] == "lima"]
         bias_df_nyc = cached_bias[cached_bias["human_region"] == "nyc"]
         
-        for q in [6, 7, 8, 9, 10]:
-            plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
-        for q in [6, 7, 8, 9, 10]:
-            plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+        # for q in [6, 7, 8, 9, 10]:
+        #     plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+        # for q in [6, 7, 8, 9, 10]:
+        #     plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
         
-        # Generate average heatmaps per question
-        plot_bias_heatmap_avg_per_question(bias_df_lima, human_region="lima", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
-        plot_bias_heatmap_avg_per_question(bias_df_nyc, human_region="nyc", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
+        # # Generate average heatmaps per question
+        # plot_bias_heatmap_avg_per_question(bias_df_lima, human_region="lima", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
+        # plot_bias_heatmap_avg_per_question(bias_df_nyc, human_region="nyc", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
     
+    # Plot
+    # for q in [6, 7, 8, 9, 10]:
+    #     plot_bias_heatmap_per_question(bias_df_lima, human_region="lima", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
+    # for q in [6, 7, 8, 9, 10]:
+    #     plot_bias_heatmap_per_question(bias_df_nyc, human_region="nyc", video_region="both", question_num=q, output_dir=config.OUTPUT_BIAS_DIR)
     
-    # # Analyze by 4 combinations: human region × video region
-    # combinations = [
-    #     ("lima", "lima"),   # Lima humans, Lima videos (1-100)
-    #     ("nyc", "nyc")      # NYC humans, NYC videos (101-200)
-    # ]
+    # Generate average heatmaps per question
+    #PRINT THE quantity of answers by vlm 
+    print("\nAnswer counts by VLM:")
+    print(bias_df_lima.groupby("AGENT")["num_comparisons"].sum())
+    print(bias_df_nyc.groupby("AGENT")["num_comparisons"].sum())
     
-    # for human_region, video_region in combinations:
-    #     print("\n" + "=" * 60)
-    #     print(f"Processing: {human_region.upper()} Humans × {video_region.upper()} Videos")
-    #     print("=" * 60)
-        
-    #     # Compute unit consensus bias
-    #     bias_df = compute_unit_consensus_bias(df_ratings, human_region=human_region, video_region=video_region)
-        
-    #     if len(bias_df) == 0:
-    #         print(f"  ⚠ No data for this combination")
-    #         continue
-        
-    #     # Generate heatmap for each question (Q6-Q10)
-    #     print(f"\n=== Generating Heatmaps (H:{human_region.upper()}, V:{video_region.upper()}) ===")
-    #     for q in [6, 7, 8, 9, 10]:
-    #         plot_bias_heatmap_per_question(
-    #             bias_df, 
-    #             human_region=human_region,
-    #             video_region=video_region,
-    #             question_num=q, 
-    #             output_dir=config.OUTPUT_BIAS_DIR
-    #         )
-
+    plot_bias_heatmap_avg_per_question(bias_df_lima, human_region="lima", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
+    plot_bias_heatmap_avg_per_question(bias_df_nyc, human_region="nyc", video_region="both", output_dir=config.OUTPUT_BIAS_DIR)
+    
     # Combine Lima and NYC heatmaps for each question
     #for q in [6, 7, 8, 9, 10]:
     #    combine_heatmaps_to_single_png(q, config.OUTPUT_BIAS_DIR)
+    
+    #show distribution of bias scores for lima and nyc
+    plot_bias_score_distributions(bias_df_lima, bias_df_nyc, config.OUTPUT_BIAS_DIR)
+    
     
     print("\n" + "=" * 60)
     print("✓ Bias analysis complete!")

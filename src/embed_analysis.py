@@ -287,7 +287,7 @@ def reduce_and_plot_umap_by_block(embeddings, df: pd.DataFrame) -> None:
                     scatter = ax.scatter(
                         embeddings_2d[mask_array, 0],
                         embeddings_2d[mask_array, 1],
-                        color=config.AGENT_COLORS_MAP[agent],
+                        color=config.PLOT_COLORS["VLM"],
                         marker=config.AGENT_MARKERS_MAP[agent],
                         label=agent,
                         alpha=0.7,
@@ -305,7 +305,7 @@ def reduce_and_plot_umap_by_block(embeddings, df: pd.DataFrame) -> None:
                     scatter = ax.scatter(
                         embeddings_2d[mask_array, 0],
                         embeddings_2d[mask_array, 1],
-                        color=config.AGENT_COLORS_MAP[agent],
+                        color=config.PLOT_COLORS["HUMAN_LIMA"],
                         marker=config.AGENT_MARKERS_MAP[agent],
                         label=agent,
                         alpha=0.7,
@@ -323,7 +323,7 @@ def reduce_and_plot_umap_by_block(embeddings, df: pd.DataFrame) -> None:
                     scatter = ax.scatter(
                         embeddings_2d[mask_array, 0],
                         embeddings_2d[mask_array, 1],
-                        color=config.AGENT_COLORS_MAP[agent],
+                        color=config.PLOT_COLORS["HUMAN_NYC"],
                         marker=config.AGENT_MARKERS_MAP[agent],
                         label=agent,
                         alpha=0.7,
@@ -797,11 +797,11 @@ def main(use_cache: bool = True, vlm_mode: str = "mean"):
     embeddings, df = process_vlm_embeddings(embeddings_all, df_all, mode=vlm_mode)
     
     # Generate plots by block
-    #reduce_and_plot_umap_by_block(embeddings, df)
+    reduce_and_plot_umap_by_block(embeddings, df)
     reduce_and_plot_pca_by_block(embeddings, df)
 
     # Generate combined PCA plots by block
-    reduce_and_plot_combined_pca_by_block(embeddings, df)
+    #reduce_and_plot_combined_pca_by_block(embeddings, df)
 
     print("\n" + "=" * 60)
     print("✓ Embedding analysis complete!")

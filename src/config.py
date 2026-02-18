@@ -20,7 +20,9 @@ OUTPUT_STSB_DIR = os.path.join(OUTPUTS_DIR, "output_stsb_roberta", "output_score
 OUTPUT_STSB_PLOTS = os.path.join(OUTPUTS_DIR, "output_stsb_roberta", "output_plots")
 
 OUTPUT_BIAS_DIR = os.path.join(OUTPUTS_DIR, "output_bias")
-OUTPUT_EMBEDDINGS_DIR = os.path.join(OUTPUTS_DIR, "output_embeddings")
+OUTPUT_EMBEDDINGS_DIR = os.path.join(OUTPUTS_DIR, "output_embeddings_small")
+
+PAIRWISE_COMPARATIONS_FILE = os.path.join(OUTPUT_EMBEDDINGS_DIR, "pairwise_comparations.csv")
 
 # Metric score files
 BERT_SCORES = {

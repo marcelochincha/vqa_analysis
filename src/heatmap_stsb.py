@@ -289,7 +289,7 @@ def generate_stsb_heatmaps(aggregated_df: pd.DataFrame, pairwise_df : pd.DataFra
             matrix = create_similarity_matrix(
                 aggregated_df,
                 block,
-                score_column="BERT_SCORE",
+                score_column="MEAN_SCORE",
                 video_region=region,
                 pairwise_df=pairwise_df,
             )
@@ -383,51 +383,10 @@ def main():
             config.STSB_SCORES["pairwise"],
             config.STSB_SCORES["aggregated"]
         )
-    
-    # #print some of the pairwise scores to verify the score showing the original TEXT_A and TEXT_B from the cache to verify the migration worked
-    # print("\nSample of pairwise scores with original texts (from cache):")
-    # #join the pairwise_df with the original answers
-    # df_answers = utils.load_answers()
-    # #drop duplicates of vlms 
-    # df_answers = df_answers[["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"]].drop_duplicates()
-    
-    #     # --- traer ANSWER_I ---
-    # df = pairwise_df.merge(
-    #     df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-    #     left_on=["VIDEO", "QUESTION_NUM", "AGENT_I"],
-    #     right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-    #     how="left"
-    # )
 
-    # df = df.rename(columns={"ANSWER": "ANSWER_I"})
-    # df = df.drop(columns=["AGENT"])
-
-    # # --- traer ANSWER_J ---
-    # df = df.merge(
-    #     df_answers[["VIDEO", "QUESTION_NUM", "AGENT", "ANSWER"]],
-    #     left_on=["VIDEO", "QUESTION_NUM", "AGENT_J"],
-    #     right_on=["VIDEO", "QUESTION_NUM", "AGENT"],
-    #     how="left"
-    # )
-
-    # df = df.rename(columns={"ANSWER": "ANSWER_J"})
-    # df = df.drop(columns=["AGENT"])
-    
-    
-    # print("\nSample of pairwise scores with texts:")
-    # sample_rows = df.head(10)
-    # for _, row in sample_rows.iterrows():
-    #     print(f"VIDEO: {row['VIDEO']}, QNUM: {row['QUESTION_NUM']}, AGENT_I: {row['AGENT_I']}, AGENT_J: {row['AGENT_J']}, BERT_SCORE: {row['BERT_SCORE']}")
-    #     print(f"  TEXT_A: {row['ANSWER_I']}")
-    #     print(f"  TEXT_B: {row['ANSWER_J']}")
-    #     print()
-        
-    # #show samples with highest and lowest scores
-    # print("\nSample of highest pairwise scores:")
-    # sample_high = df[(df["QUESTION_NUM"] >= 6) & (df["QUESTION_NUM"] <= 10)].sort_values(by="BERT_SCORE", ascending=False).head(5)
-    # print(sample_high)
-    
     # Generate heatmaps
+    print(aggregated_df.head())
+    print(pairwise_df.head())
     generate_stsb_heatmaps(aggregated_df, pairwise_df)
     
     print("\n" + "=" * 60)
