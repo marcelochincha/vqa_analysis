@@ -24,7 +24,7 @@ BATCH_SIZE = 64  # Adjust based on your GPU/CPU capabilities
 
 def _make_embed_key(row) -> tuple:
     """Create a unique cache key for an answer row."""
-    return (str(row["AGENT"]), str(row["VIDEO"]), int(row["QUESTION_NUM"]))
+    return (str(row["AGENT"]), str(row["VIDEO"]), int(row["QUESTION_NUM"]), int(row["REPETITION"]))
 
 
 def load_embedding_cache(cache_path: str) -> dict:
