@@ -9,8 +9,6 @@ import re
 import numpy as np
 import logging
 
-
-
 logging.basicConfig(
     filename="clean_block2.log",
     filemode="w",        # "w" = sobrescribe, "a" = append
@@ -182,7 +180,7 @@ def main():
     parser = argparse.ArgumentParser(description='Join two CSV files')
     parser.add_argument('--csv_humans', default='data/raw/humans/answers_raw_human.csv', help='Path to the first CSV file')
     parser.add_argument('--vlm_dir', default='data/raw/vlms', help='Path to the second CSV file')
-    parser.add_argument('--output', default='data/r2.csv', help='Path to the output CSV file')
+    parser.add_argument('--output', default='data/r2_cleaned.csv', help='Path to the output CSV file')
     args = parser.parse_args()
 
     df1 = process_humans(args.csv_humans)
@@ -216,6 +214,8 @@ def main():
             new_value = valid[-1] if valid else np.nan
             logger.info(f"EXTRACTED: '{text}' -> {new_value} (from numbers {valid})")
             return str(new_value)
+        
+        return "nan"
 
     #normalize ndke
     mask = result["BLOCK"] == 2

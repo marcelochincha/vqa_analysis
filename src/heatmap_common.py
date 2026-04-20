@@ -8,8 +8,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Optional, Tuple
 from matplotlib.colors import LinearSegmentedColormap
-from src import config, utils
+from src.old import config
 import matplotlib.patches as patches
+
+from src.old import utils
 
 
 # ============================================================================

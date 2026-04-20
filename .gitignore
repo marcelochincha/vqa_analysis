@@ -221,3 +221,8 @@ old_outputs/
 input_data/
 smatch_temp/
 data/
+
+*.pdf
+*.png
+*.svg
+*.pkl

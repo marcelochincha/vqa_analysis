@@ -10,11 +10,13 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib
+
+from src.old import utils
 matplotlib.use('Agg')  # Use non-interactive backend for plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
-from src import config, utils
+from src.old import config
 
 
 def extract_ratings(df: pd.DataFrame) -> pd.DataFrame:
