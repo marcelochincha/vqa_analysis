@@ -84,7 +84,7 @@ def run(config: PipelineConfig, show_progress: bool = False) -> Path:
     blocks = sorted(agg_df2["BLOCK"].unique())
     nrows = len(sectors)
     ncols = len(blocks)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows), sharex=True, sharey=True)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows), sharex=True, sharey=True)
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1 or ncols == 1:
@@ -117,6 +117,6 @@ def run(config: PipelineConfig, show_progress: bool = False) -> Path:
     fig.suptitle("Cosine similarity heatmaps by block and region", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "cosine_heatmap_grid.png"
-    fig.savefig(out_path, dpi=250, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     return out_path

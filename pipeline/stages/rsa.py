@@ -98,7 +98,7 @@ def run(config: PipelineConfig, show_progress: bool = False) -> Path:
     sectors = list(df_first["VIDEO_SECTOR"].unique())[::-1]
     blocks = sorted(df_first["BLOCK"].unique().astype(int))
     nrows, ncols = len(sectors), len(blocks)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows), sharex=True, sharey=True)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows), sharex=True, sharey=True)
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1 or ncols == 1:
@@ -130,6 +130,6 @@ def run(config: PipelineConfig, show_progress: bool = False) -> Path:
     fig.suptitle("RSA analysis - Representational Similarity Analysis", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "rsa_heatmap_grid.png"
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300) #, bbox_inches="tight")
     plt.close(fig)
     return out_path
