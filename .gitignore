@@ -221,6 +221,7 @@ old_outputs/
 input_data/
 smatch_temp/
 data/
+unused/
 
 *.pdf
 *.png

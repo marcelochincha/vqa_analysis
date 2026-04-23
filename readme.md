@@ -1,68 +1,147 @@
-# VQA Analysis: Preprocessing & Metrics
+# VQA Analysis Pipeline
 
-This project analyzes and compares answers from Vision-Language Models (VLMs) and humans on VQA tasks. It includes scripts for preprocessing data and computing various metrics and analyses.
+A modular pipeline for analyzing Visual Question Answering (VQA) data from human annotators and Vision-Language Models (VLMs). Generates cosine similarity heatmaps, RSA (Representational Similarity Analysis), bias violin plots, and PCA embeddings.
 
-## 1. Preprocessing
-
-Preprocessing scripts are in the `pre_processing/` folder. They combine and clean human and VLM answers into a single CSV for analysis.
-
-### Steps:
-
-1. **Prepare Human Answers**
-   - Edit or use the script: `pre_processing/pre_process_human.py`
-   - Input: Raw human answers CSV (e.g., `pre_processing/humans/answers_raw_human.csv`)
-   - Output: Cleaned CSV (e.g., `pre_processing/answers_human.csv`)
-
-2. **Prepare VLM Answers**
-   - Edit or use the script: `pre_processing/pre_process_vlms.py`
-   - Input: VLM JSON files (e.g., `pre_processing/vlms/*.json`)
-   - Output: Cleaned CSV (e.g., `pre_processing/answers_vlms.csv`)
-
-3. **Combine All Answers**
-   - Merge human and VLM CSVs into a single file: `pre_processing/answers_allagents.csv`
-   - Columns: `AGENT, VIDEO, QUESTION_NUM, QUESTION, ANSWER`
-
-See `pre_processing/readme.md` for more details.
-
-## 2. Metric Computation & Analysis
-
-Analysis scripts are in the `src/` folder. Each script computes a different metric or visualization.
-
-### Main Scripts:
-
-- `src/embed_analysis.py` — Embedding analysis (UMAP/PCA)
-- `src/bias_analysis.py` — Bias analysis by region/agent
-- `src/heatmap_smatch.py` — SMATCH metric (AMR parsing)
-- `src/heatmap_stsb.py` — STSB-RoBERTa metric
-- `src/run_all.py` — Run all analyses in sequence
-
-### Usage
-
-Run scripts from the workspace root:
+## Quick Start
 
 ```powershell
-# Embedding analysis
-python -m src.embed_analysis
-
-# Bias analysis
-python -m src.bias_analysis
-
-# SMATCH metric
-python -m src.heatmap_smatch
-
-# STSB-RoBERTa metric
-python -m src.heatmap_stsb
-
+cd F:\robusto\vqa_analysis
+python -m pipeline --all
 ```
 
-Outputs are saved in the `outputs/` folder, organized by metric.
+This runs all 5 stages in sequence: `preprocess` → `embed` → `cosine` → `rsa` → `bias`
 
-## 3. Requirements
+---
 
-Install dependencies:
+## Data Placement
+
+### Raw Human Answers
+Place your raw human survey CSV at:
+```
+data/raw/humans/answers_raw_human.csv
+```
+
+Expected format: Wide format with columns like `R2_153-Q1`, `R2_153-Q2`, etc. (survey question columns).
+
+### VLM JSON Files
+Place your VLM response JSON files in:
+```
+data/raw/vlms/
+```
+
+Each JSON file should contain an array of objects with `video`, `question`, and `response` fields.
+
+### Embeddings Cache
+Place your pre-computed embeddings cache at:
+```
+external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl
+```
+
+Or specify a custom path with `--embeddings`.
+
+---
+
+## Running Stages Individually
+
+### 1. Preprocess (required first)
+```powershell
+python -m pipeline preprocess --human-csv data/raw/humans/answers_raw_human.csv --vlm-dir data/raw/vlms
+```
+
+Output: `data/r2_cleaned.csv`
+
+### 2. Embed (PCA scatter plots)
+```powershell
+python -m pipeline embed --data data/r2_cleaned.csv --embeddings external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl
+```
+
+Output: `outputs/pipeline/embed/pca_by_block_sector.png`
+
+### 3. Cosine Similarity
+```powershell
+python -m pipeline cosine --data data/r2_cleaned.csv --embeddings external_embeds/... --progress
+```
+
+Output: `outputs/pipeline/cosine/cosine_heatmap_grid.png`
+
+Use `--progress` to show tqdm progress bars.
+
+### 4. RSA
+```powershell
+python -m pipeline rsa --data data/r2_cleaned.csv --embeddings external_embeds/... --progress
+```
+
+Output: `outputs/pipeline/rsa/rsa_heatmap_grid.png`
+
+### 5. Bias (Violin Plots)
+```powershell
+python -m pipeline bias --data data/r2_cleaned.csv
+```
+
+Output: `outputs/pipeline/bias/bias_violin_distribution.png`
+
+---
+
+## CLI Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `stages` | Stages to run (space-separated) | - |
+| `--all` | Run all stages | - |
+| `--list` | List available stages | - |
+| `--progress` | Show progress bars | False |
+| `--data` | Input CSV (after preprocess) | `data/r2_cleaned.csv` |
+| `--embeddings` | Embeddings cache file | `external_embeds/...` |
+| `--outdir` | Output directory | `outputs/pipeline` |
+| `--human-csv` | Raw human CSV for preprocess | `data/raw/humans/answers_raw_human.csv` |
+| `--vlm-dir` | VLM JSON directory | `data/raw/vlms/` |
+
+---
+
+## Output Files
+
+```
+outputs/pipeline/
+├── embed/
+│   └── pca_by_block_sector.png
+├── cosine/
+│   └── cosine_heatmap_grid.png
+├── rsa/
+│   └── rsa_heatmap_grid.png
+└── bias/
+    └── bias_violin_distribution.png
+```
+
+---
+
+## Agent Ordering Convention
+
+All heatmaps use consistent agent ordering:
+
+1. **VLMs** (alphabetically sorted)
+2. **HUMAN_LIMA** (human annotators from Lima)
+3. **HUMAN_NYC** (human annotators from NYC)
+
+This puts VLM agents first, human baselines at the end for visual comparison.
+
+---
+
+## Block Definitions
+
+- **Block 1**: Questions 1-5 (video identification tasks)
+- **Block 2**: Questions 6-10 (rating scale 1-10)
+
+The pipeline computes metrics separately per block and per video sector (Lima/NYC).
+
+---
+
+## Requirements
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-Make sure to install the STOG model from amrlib (Check the amrlib documentation for installation instructions).
+Key dependencies:
+- `numpy`, `pandas`, `scipy`, `scikit-learn`
+- `seaborn`, `matplotlib`
+- `tqdm`
