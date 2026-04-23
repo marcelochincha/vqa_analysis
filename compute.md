@@ -25,8 +25,10 @@ Prepares raw data from human annotators and VLM outputs into a unified CSV forma
 
 3. **Block assignment**:
    - Questions are grouped into experimental blocks:
-     - **Block 1**: Questions 1-5 (video identification tasks)
-     - **Block 2**: Questions 6-10 (rating scale questions)
+     - **Block 1**: Questions 1-5 (Factual - video identification)
+     - **Block 2**: Questions 6-10 (Ratings - scale 1-10)
+     - **Block 3**: Questions 11-15 (Counterfactual & Hypothetical)
+     - **Block 4**: Questions 16+ (Reasoning)
    - Computed via `assign_block(question_num)` function
 
 ### Output
@@ -36,7 +38,7 @@ Prepares raw data from human annotators and VLM outputs into a unified CSV forma
   - `QUESTION_NUM`: Question number (1-10)
   - `ANSWER`: Numeric or text answer
   - `REPETITION`: Repetition number
-  - `BLOCK`: Experimental block (1 or 2)
+  - `BLOCK`: Experimental block (1, 2, 3, or 4)
   - `VIDEO_SECTOR`: Geographic region (Lima or NYC)
 
 ---

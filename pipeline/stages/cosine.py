@@ -39,7 +39,8 @@ def run(config: PipelineConfig, show_progress: bool = False) -> Path:
     agent_order = get_ordered_agents(df)
 
     results = []
-    groups = list(df.groupby(["VIDEO", "QUESTION_NUM"]))
+    df_first = df[df["REPETITION"] == 1].reset_index(drop=True)
+    groups = list(df_first.groupby(["VIDEO", "QUESTION_NUM"]))
     iterator = tqdm(groups, desc="Computing cosine", unit="group") if show_progress else groups
 
     for (video, qnum), group in iterator:

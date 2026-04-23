@@ -51,34 +51,35 @@ python -m pipeline preprocess --human-csv data/raw/humans/answers_raw_human.csv 
 Output: `data/r2_cleaned.csv`
 
 ### 2. Embed (PCA scatter plots)
+
 ```powershell
 python -m pipeline embed --data data/r2_cleaned.csv --embeddings external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl
 ```
 
-Output: `outputs/pipeline/embed/pca_by_block_sector.png`
+Uses **Repetition 1 only** (representative sample per agent-video-question).
 
 ### 3. Cosine Similarity
+
 ```powershell
 python -m pipeline cosine --data data/r2_cleaned.csv --embeddings external_embeds/... --progress
 ```
 
-Output: `outputs/pipeline/cosine/cosine_heatmap_grid.png`
-
-Use `--progress` to show tqdm progress bars.
+Uses **Repetition 1 only** (representative sample per agent-video-question).
 
 ### 4. RSA
+
 ```powershell
 python -m pipeline rsa --data data/r2_cleaned.csv --embeddings external_embeds/... --progress
 ```
 
-Output: `outputs/pipeline/rsa/rsa_heatmap_grid.png`
+Uses **Repetition 1 only** (representative sample per agent-video-question).
 
 ### 5. Bias (Violin Plots)
 ```powershell
 python -m pipeline bias --data data/r2_cleaned.csv
 ```
 
-Output: `outputs/pipeline/bias/bias_violin_distribution.png`
+Uses **Block 2, Repetition 1 only** (rating scale questions 6-10).
 
 ---
 
@@ -128,10 +129,14 @@ This puts VLM agents first, human baselines at the end for visual comparison.
 
 ## Block Definitions
 
-- **Block 1**: Questions 1-5 (video identification tasks)
-- **Block 2**: Questions 6-10 (rating scale 1-10)
+- **Block 1**: Questions 1-5 (Factual - video identification)
+- **Block 2**: Questions 6-10 (Ratings - scale 1-10)
+- **Block 3**: Questions 11-15 (Counterfactual & Hypothetical)
+- **Block 4**: Questions 16+ (Reasoning)
 
 The pipeline computes metrics separately per block and per video sector (Lima/NYC).
+
+> **Note**: All stages use Repetition 1 only (a single representative sample per agent-video-question).
 
 ---
 
