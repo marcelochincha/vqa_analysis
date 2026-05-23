@@ -39,6 +39,22 @@ external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl
 
 Or specify a custom path with `--embeddings`.
 
+### Generate Embeddings Cache (separate step)
+Run this in a separate conda environment (GPU-friendly). This writes the keyed pickle used by the pipeline.
+
+```bash
+conda activate <env>
+python scripts/generate_embeddings.py --model sentence-transformers/all-mpnet-base-v2 --output external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl --batch-size 64 --resume
+
+# Qwen embedding model (adjust batch size for your hardware)
+python scripts/generate_embeddings.py --model Qwen/Qwen3-Embedding-4B --output external_embeds/cleaned_embeddings_cache_keyed_qwen.pkl --batch-size 1 --trust-remote-code --resume
+```
+
+Optional .npz output for downstream tooling:
+```bash
+python scripts/generate_embeddings.py --model sentence-transformers/all-mpnet-base-v2 --output external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl --npz external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.npz --resume
+```
+
 ---
 
 ## Running Stages Individually
@@ -130,6 +146,7 @@ This puts VLM agents first, human baselines at the end for visual comparison.
 ## Block Definitions
 
 - **Block 1**: Questions 1-5 (Factual - video identification)
+    - Questions in Block 1 vary by video and are defined in final_questions_v3.yaml.
 - **Block 2**: Questions 6-10 (Ratings - scale 1-10)
 - **Block 3**: Questions 11-15 (Counterfactual & Hypothetical)
 - **Block 4**: Questions 16+ (Reasoning)
