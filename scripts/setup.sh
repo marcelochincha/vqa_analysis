@@ -10,7 +10,6 @@ fi
 
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 CONDA_DIR="${CONDA_DIR:-$HOME/miniconda3}"
-MINICONDA_URL="${MINICONDA_URL:-https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh}"
 
 ENV_EMBED="${ENV_EMBED:-vqa-embed}"
 ENV_PIPELINE="${ENV_PIPELINE:-vqa-pipeline}"
@@ -24,30 +23,9 @@ log() {
   echo "[setup] $*"
 }
 
-install_miniconda() {
-  log "Installing Miniconda to ${CONDA_DIR}"
-  local installer
-  installer="$(mktemp)"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "${MINICONDA_URL}" -o "${installer}"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "${installer}" "${MINICONDA_URL}"
-  else
-    echo "Error: curl or wget is required to download Miniconda." >&2
-    exit 1
-  fi
-  chmod +x "${installer}"
-  "${installer}" -b -p "${CONDA_DIR}"
-  rm -f "${installer}"
-}
-
 if ! command -v conda >/dev/null 2>&1; then
-  if [ -x "${CONDA_DIR}/bin/conda" ]; then
-    log "Using existing conda at ${CONDA_DIR}/bin/conda"
-  else
-    install_miniconda
-  fi
-  export PATH="${CONDA_DIR}/bin:${PATH}"
+  echo "Error: conda not found. Please install Miniconda/Anaconda and ensure 'conda' is on PATH." >&2
+  exit 1
 fi
 
 if [ -f "${CONDA_DIR}/etc/profile.d/conda.sh" ]; then

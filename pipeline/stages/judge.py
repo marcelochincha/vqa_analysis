@@ -652,7 +652,7 @@ def run(
     ].reset_index(drop=True)
 
     df_answers["VIDEO_SECTOR"] = (
-        df_answers["VIDEO_SECTOR"].apply(
+        df_answers["VIDEO"].apply(
             get_video_sector
         )
     )
