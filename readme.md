@@ -11,6 +11,61 @@ python -m pipeline --all
 
 This runs all 5 stages in sequence: `preprocess` → `embed` → `cosine` → `rsa` → `bias`
 
+Note: this assumes you already have the preprocessed CSV and an embeddings cache. See the Full setup section below for the end-to-end workflow.
+
+---
+
+## Full Setup (Linux / Lambda)
+
+### 1. Install everything (Miniconda + envs)
+
+```bash
+bash scripts/setup.sh
+```
+
+### 2. Preprocess (merge raw data into a cleaned CSV)
+
+This step combines the human CSV and VLM JSONs and produces the cleaned CSV used downstream.
+
+```bash
+conda activate vqa-pipeline
+python -m pipeline preprocess --human-csv data/raw/humans/answers_raw_human.csv --vlm-dir data/raw/vlms
+```
+
+Output: `data/r2_cleaned.csv`
+
+### 3. Generate embeddings (run after preprocess)
+
+Embeddings are computed from the cleaned CSV produced in the previous step.
+
+```bash
+conda activate vqa-embed
+python scripts/generate_embeddings.py \
+    --model sentence-transformers/all-mpnet-base-v2 \
+    --data data/r2_cleaned.csv \
+    --output external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl \
+    --batch-size 64 \
+    --resume
+```
+
+### 4. Run all comparisons (pipeline stages)
+
+```bash
+conda activate vqa-pipeline
+python -m pipeline --all \
+    --data data/r2_cleaned.csv \
+    --embeddings external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl \
+    --progress
+```
+
+### Optional: single command for embeddings + pipeline
+
+If `data/r2_cleaned.csv` already exists, you can run the simple script:
+
+```bash
+bash scripts/run_all.sh
+```
+
 ---
 
 ## Data Placement
@@ -40,7 +95,7 @@ external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl
 Or specify a custom path with `--embeddings`.
 
 ### Generate Embeddings Cache (separate step)
-Run this in a separate conda environment (GPU-friendly). This writes the keyed pickle used by the pipeline.
+Run this after preprocess in a separate conda environment (GPU-friendly). This writes the keyed pickle used by the pipeline.
 
 ```bash
 conda activate <env>
