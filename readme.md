@@ -58,6 +58,29 @@ python -m pipeline --all \
     --progress
 ```
 
+### Run judge with vLLM (engine + judge)
+
+Run vLLM in one terminal:
+
+```bash
+conda activate vqa-vllm
+bash scripts/bash.sh
+```
+
+Then run judge in another terminal:
+
+```bash
+bash run_judge.sh
+```
+
+You can override model and base URL via env vars:
+
+```bash
+BASE_URL=http://localhost:8000/v1 \
+MODEL=Qwen/Qwen3-4B \
+bash run_judge.sh
+```
+
 ### Optional: single command for embeddings + pipeline
 
 If `data/r2_cleaned.csv` already exists, you can run the simple script:
