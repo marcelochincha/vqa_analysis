@@ -10,12 +10,47 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import yaml
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
 from pipeline.style import apply_style
 from pipeline.utils.io import load_csv
 from pipeline.utils.metrics import get_video_sector
+# =========================================================
+# QUESTIONS MAP
+# =========================================================
+
+def load_questions_map(path: Path) -> dict[tuple[str, int], str]:
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Questions YAML not found: {path}"
+        )
+
+    raw = yaml.safe_load(
+        path.read_text(
+            encoding="utf-8"
+        )
+    ) or {}
+
+    mapping: dict[tuple[str, int], str] = {}
+    for video, questions in raw.items():
+        if not isinstance(questions, dict):
+            continue
+        for qkey, meta in questions.items():
+            m = re.match(r"Q(\d+)$", str(qkey).strip())
+            if not m:
+                continue
+            qnum = int(m.group(1))
+            if isinstance(meta, dict):
+                question = str(meta.get("question", "")).strip()
+            else:
+                question = ""
+            mapping[(str(video), qnum)] = question
+
+    return mapping
+
 
 
 # =========================================================
@@ -650,6 +685,32 @@ def run(
     df_answers = df_answers[
         df_answers["BLOCK"] != 2
     ].reset_index(drop=True)
+
+    if "QUESTION" not in df_answers.columns:
+        questions_path = (
+            config.workspace_root
+            / "final_questions_v3.yaml"
+        )
+        questions_map = load_questions_map(
+            questions_path
+        )
+
+        def lookup_question(row) -> str:
+            try:
+                key = (
+                    str(row["VIDEO"]),
+                    int(row["QUESTION_NUM"]),
+                )
+            except Exception:
+                return ""
+            return questions_map.get(key, "")
+
+        df_answers["QUESTION"] = (
+            df_answers.apply(
+                lookup_question,
+                axis=1,
+            )
+        )
 
     df_answers["VIDEO_SECTOR"] = (
         df_answers["VIDEO"].apply(

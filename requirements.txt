@@ -11,3 +11,4 @@ umap-learn>=0.5.0
 smatch>=1.0.4
 tqdm>=4.0.0
 vllm>=0.1.0
+pyyaml>=6.0
