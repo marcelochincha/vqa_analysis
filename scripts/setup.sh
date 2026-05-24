@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  echo "Error: do not source this script. Run: bash scripts/setup.sh" >&2
+  return 1
+fi
+
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 CONDA_DIR="${CONDA_DIR:-$HOME/miniconda3}"
 MINICONDA_URL="${MINICONDA_URL:-https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh}"
@@ -31,7 +36,8 @@ install_miniconda() {
     echo "Error: curl or wget is required to download Miniconda." >&2
     exit 1
   fi
-  bash "${installer}" -b -p "${CONDA_DIR}"
+  chmod +x "${installer}"
+  "${installer}" -b -p "${CONDA_DIR}"
   rm -f "${installer}"
 }
 
