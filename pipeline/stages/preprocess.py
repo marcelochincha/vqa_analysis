@@ -12,13 +12,16 @@ import pandas as pd
 from pipeline.config import PipelineConfig
 
 
-logging.basicConfig(
-    filename="preprocess.log",
-    filemode="w",
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
+
+
+def _setup_block2_log(log_path: Path) -> logging.FileHandler:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    return handler
 
 
 def normalize_text(s: str) -> str:
@@ -148,26 +151,42 @@ def process_vlms(vlm_dir: Path, expected: int = 20, placeholder: str = "NO ANSWE
     return pd.DataFrame(rows, columns=["AGENT", "VIDEO", "QUESTION_NUM", "ANSWER"])
 
 
-def extract_number_with_log(text) -> str:
-    if not isinstance(text, str):
-        return "nan"
-    math_pattern = re.search(r"(\d+)\s*out\s*of\s*(\d+)", text, re.IGNORECASE)
-    numbers = re.findall(r"\b\d+\b", text)
+def extract_number_with_log(text, ctx: str = "") -> tuple[str, str]:
+    """Return (cleaned_value, action) where action is one of:
+       'as_is' | 'extracted_xy' | 'extracted_number' | 'nan_no_match' | 'nan_non_string'
+    """
+    prefix = f"[{ctx}] " if ctx else ""
 
+    if not isinstance(text, str):
+        logger.warning(f"{prefix}NAN: non-string input ({type(text).__name__})")
+        return "nan", "nan_non_string"
+
+    stripped = text.strip()
+    try:
+        as_int = int(float(stripped))
+        if 1 <= as_int <= 10:
+            logger.info(f"{prefix}AS-IS: '{text}' -> {as_int}")
+            return str(as_int), "as_is"
+    except (ValueError, TypeError):
+        pass
+
+    math_pattern = re.search(r"(\d+)\s*out\s*of\s*(\d+)", text, re.IGNORECASE)
     if math_pattern:
         x = int(math_pattern.group(1))
         y = int(math_pattern.group(2))
         if 1 <= x <= 10 and y >= x:
-            logger.info(f"EXTRACTED: '{text}' -> {x} (from pattern '{x} out of {y}')")
-            return str(x)
-    if numbers:
-        valid = [int(n) for n in numbers if 1 <= int(n) <= 10]
-        if valid:
-            new_value = valid[-1]
-            logger.info(f"EXTRACTED: '{text}' -> {new_value} (from numbers {valid})")
-            return str(new_value)
+            logger.info(f"{prefix}EXTRACTED-XY: '{text}' -> {x} (matched '{x} out of {y}')")
+            return str(x), "extracted_xy"
 
-    return "nan"
+    numbers = re.findall(r"\b\d+\b", text)
+    valid = [int(n) for n in numbers if 1 <= int(n) <= 10]
+    if valid:
+        chosen = valid[-1]
+        logger.info(f"{prefix}EXTRACTED-NUM: '{text}' -> {chosen} (from candidates {valid})")
+        return str(chosen), "extracted_number"
+
+    logger.warning(f"{prefix}NAN: no number in [1,10] found in '{text}'")
+    return "nan", "nan_no_match"
 
 
 def run(config: PipelineConfig, human_csv: Path | None = None, vlm_dir: Path | None = None, output_csv: Path | None = None) -> Path:
@@ -176,32 +195,68 @@ def run(config: PipelineConfig, human_csv: Path | None = None, vlm_dir: Path | N
     vlm_input = vlm_dir or root / "data/raw/vlms"
     output_cleaned = output_csv or root / "data/r2_cleaned.csv"
     output_raw = output_cleaned.parent / "r2.csv"
+    log_path = output_cleaned.parent / "preprocess.log"
+    audit_path = output_cleaned.parent / "preprocess_block2_audit.csv"
 
-    print(f"Processing humans from {human_input}...")
-    df_humans = process_humans(human_input)
+    handler = _setup_block2_log(log_path)
+    try:
+        print(f"Processing humans from {human_input}...")
+        df_humans = process_humans(human_input)
 
-    print(f"Processing VLMs from {vlm_input}...")
-    df_vlms = process_vlms(vlm_input)
+        print(f"Processing VLMs from {vlm_input}...")
+        df_vlms = process_vlms(vlm_input)
 
-    result = pd.concat([df_humans, df_vlms], ignore_index=True)
+        result = pd.concat([df_humans, df_vlms], ignore_index=True)
+        result["REPETITION"] = result.groupby(["AGENT", "VIDEO", "QUESTION_NUM"]).cumcount() + 1
+        result["BLOCK"] = result["QUESTION_NUM"].apply(lambda x: (x - 1) // 5 + 1)
+        cols = ["AGENT", "VIDEO", "BLOCK", "QUESTION_NUM", "REPETITION", "ANSWER"]
+        result = result[cols]
 
-    result["REPETITION"] = result.groupby(["AGENT", "VIDEO", "QUESTION_NUM"]).cumcount() + 1
-    result["BLOCK"] = result["QUESTION_NUM"].apply(lambda x: (x - 1) // 5 + 1)
-    cols = ["AGENT", "VIDEO", "BLOCK", "QUESTION_NUM", "REPETITION", "ANSWER"]
-    result = result[cols]
+        # RAW snapshot (block 2 answers preserved in original free-text form)
+        output_raw.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(output_raw, index=False)
+        print(f"Saved {len(result)} rows (RAW) to {output_raw}")
 
-    # Save the RAW snapshot (block 2 answers still in original free-text form)
-    output_raw.parent.mkdir(parents=True, exist_ok=True)
-    result.to_csv(output_raw, index=False)
-    print(f"Saved {len(result)} rows (RAW) to {output_raw}")
+        # Block-2 numeric extraction with per-row audit
+        result_cleaned = result.copy()
+        mask_b2 = result_cleaned["BLOCK"] == 2
+        b2_rows = result_cleaned.loc[mask_b2]
 
-    # Apply block-2 numeric extraction and save the CLEANED version
-    result_cleaned = result.copy()
-    mask_b2 = result_cleaned["BLOCK"] == 2
-    result_cleaned.loc[mask_b2, "ANSWER"] = result_cleaned.loc[mask_b2, "ANSWER"].apply(extract_number_with_log)
+        logger.info(f"Starting block-2 normalization on {len(b2_rows)} rows")
+        audit_records = []
+        new_answers = []
+        for idx, row in b2_rows.iterrows():
+            ctx = f"{row['AGENT']}|{row['VIDEO']}|Q{row['QUESTION_NUM']}|R{row['REPETITION']}"
+            cleaned, action = extract_number_with_log(row["ANSWER"], ctx=ctx)
+            new_answers.append(cleaned)
+            audit_records.append({
+                "AGENT": row["AGENT"],
+                "VIDEO": row["VIDEO"],
+                "QUESTION_NUM": row["QUESTION_NUM"],
+                "REPETITION": row["REPETITION"],
+                "ANSWER_RAW": row["ANSWER"],
+                "ANSWER_CLEAN": cleaned,
+                "ACTION": action,
+            })
+        result_cleaned.loc[mask_b2, "ANSWER"] = new_answers
 
-    output_cleaned.parent.mkdir(parents=True, exist_ok=True)
-    result_cleaned.to_csv(output_cleaned, index=False)
-    print(f"Saved {len(result_cleaned)} rows (CLEANED, block-2 normalized) to {output_cleaned}")
+        # Audit CSV (one row per block-2 answer with before/after/action)
+        audit_df = pd.DataFrame(audit_records)
+        audit_df.to_csv(audit_path, index=False)
 
-    return output_cleaned
+        # Summary stats
+        counts = audit_df["ACTION"].value_counts().to_dict()
+        summary = " | ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        logger.info(f"Block-2 normalization done. Counts: {summary}")
+        print(f"Block-2 normalization summary: {summary}")
+
+        output_cleaned.parent.mkdir(parents=True, exist_ok=True)
+        result_cleaned.to_csv(output_cleaned, index=False)
+        print(f"Saved {len(result_cleaned)} rows (CLEANED) to {output_cleaned}")
+        print(f"Block-2 audit CSV: {audit_path}")
+        print(f"Per-row log:       {log_path}")
+
+        return output_cleaned
+    finally:
+        logger.removeHandler(handler)
+        handler.close()

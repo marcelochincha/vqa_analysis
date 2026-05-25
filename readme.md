@@ -46,7 +46,7 @@ python scripts/generate_embeddings.py \
     --model sentence-transformers/all-mpnet-base-v2 \
     --data data/r2_cleaned.csv \
     --output external_embeds/allmpnet_batch1_r2_embeddings_cache_keyed.pkl \
-    --batch-size 64 \
+    --batch-size 1 \
     --resume
 ```
 
@@ -225,8 +225,10 @@ Outputs **two** CSVs side by side:
 |---|---|
 | `data/r2.csv` | RAW concatenation of humans + VLMs. Block-2 answers preserved in their original free-text form (e.g. `"I'd say 7 out of 10"`, `"around 4"`). Useful for manual inspection or alternate cleaning. |
 | `data/r2_cleaned.csv` | Same data but with block-2 answers normalized to a single integer in `[1, 10]` via `extract_number_with_log`. **This is the file every downstream stage consumes.** |
+| `data/preprocess.log` | Per-row trace of every block-2 transformation: `AS-IS`, `EXTRACTED-XY` (matched `"X out of Y"`), `EXTRACTED-NUM` (picked last valid number), or `NAN` (couldn't parse). Use this when you want to audit a specific cleaning decision. |
+| `data/preprocess_block2_audit.csv` | Tabular version of the same audit, one row per block-2 answer with columns `AGENT, VIDEO, QUESTION_NUM, REPETITION, ANSWER_RAW, ANSWER_CLEAN, ACTION`. Easier to grep/filter than the log when you want to look at *all* `nan_no_match` cases at once. |
 
-Both share the exact same schema (`AGENT, VIDEO, BLOCK, QUESTION_NUM, REPETITION, ANSWER`).
+The two CSVs share the exact same schema (`AGENT, VIDEO, BLOCK, QUESTION_NUM, REPETITION, ANSWER`).
 
 ### 2. Embed (PCA scatter plots)
 
