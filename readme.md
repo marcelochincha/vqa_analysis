@@ -34,7 +34,7 @@ conda activate vqa-pipeline
 python -m pipeline preprocess --human-csv data/raw/humans/answers_raw_human.csv --vlm-dir data/raw/vlms
 ```
 
-Output: `data/r2_cleaned.csv`
+Outputs: `data/r2.csv` (raw, block-2 untouched) and `data/r2_cleaned.csv` (block-2 normalized — used by downstream stages).
 
 ### 3. Generate embeddings (run after preprocess)
 
@@ -219,7 +219,14 @@ python scripts/generate_embeddings.py --model sentence-transformers/all-mpnet-ba
 python -m pipeline preprocess --human-csv data/raw/humans/answers_raw_human.csv --vlm-dir data/raw/vlms
 ```
 
-Output: `data/r2_cleaned.csv`
+Outputs **two** CSVs side by side:
+
+| File | What's inside |
+|---|---|
+| `data/r2.csv` | RAW concatenation of humans + VLMs. Block-2 answers preserved in their original free-text form (e.g. `"I'd say 7 out of 10"`, `"around 4"`). Useful for manual inspection or alternate cleaning. |
+| `data/r2_cleaned.csv` | Same data but with block-2 answers normalized to a single integer in `[1, 10]` via `extract_number_with_log`. **This is the file every downstream stage consumes.** |
+
+Both share the exact same schema (`AGENT, VIDEO, BLOCK, QUESTION_NUM, REPETITION, ANSWER`).
 
 ### 2. Embed (PCA scatter plots)
 

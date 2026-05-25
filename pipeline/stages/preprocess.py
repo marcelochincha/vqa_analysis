@@ -174,7 +174,8 @@ def run(config: PipelineConfig, human_csv: Path | None = None, vlm_dir: Path | N
     root = config.workspace_root
     human_input = human_csv or root / "data/raw/humans/answers_raw_human.csv"
     vlm_input = vlm_dir or root / "data/raw/vlms"
-    output = output_csv or root / "data/r2_cleaned.csv"
+    output_cleaned = output_csv or root / "data/r2_cleaned.csv"
+    output_raw = output_cleaned.parent / "r2.csv"
 
     print(f"Processing humans from {human_input}...")
     df_humans = process_humans(human_input)
@@ -186,14 +187,21 @@ def run(config: PipelineConfig, human_csv: Path | None = None, vlm_dir: Path | N
 
     result["REPETITION"] = result.groupby(["AGENT", "VIDEO", "QUESTION_NUM"]).cumcount() + 1
     result["BLOCK"] = result["QUESTION_NUM"].apply(lambda x: (x - 1) // 5 + 1)
+    cols = ["AGENT", "VIDEO", "BLOCK", "QUESTION_NUM", "REPETITION", "ANSWER"]
+    result = result[cols]
 
-    mask_b2 = result["BLOCK"] == 2
-    result.loc[mask_b2, "ANSWER"] = result.loc[mask_b2, "ANSWER"].apply(extract_number_with_log)
+    # Save the RAW snapshot (block 2 answers still in original free-text form)
+    output_raw.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(output_raw, index=False)
+    print(f"Saved {len(result)} rows (RAW) to {output_raw}")
 
-    result = result[["AGENT", "VIDEO", "BLOCK", "QUESTION_NUM", "REPETITION", "ANSWER"]]
+    # Apply block-2 numeric extraction and save the CLEANED version
+    result_cleaned = result.copy()
+    mask_b2 = result_cleaned["BLOCK"] == 2
+    result_cleaned.loc[mask_b2, "ANSWER"] = result_cleaned.loc[mask_b2, "ANSWER"].apply(extract_number_with_log)
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    result.to_csv(output, index=False)
-    print(f"Saved {len(result)} rows to {output}")
+    output_cleaned.parent.mkdir(parents=True, exist_ok=True)
+    result_cleaned.to_csv(output_cleaned, index=False)
+    print(f"Saved {len(result_cleaned)} rows (CLEANED, block-2 normalized) to {output_cleaned}")
 
-    return output
+    return output_cleaned
