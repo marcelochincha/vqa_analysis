@@ -190,6 +190,37 @@ Uses **Block 2, Repetition 1 only** (rating scale questions 6-10).
 | `--outdir` | Output directory | `outputs/pipeline` |
 | `--human-csv` | Raw human CSV for preprocess | `data/raw/humans/answers_raw_human.csv` |
 | `--vlm-dir` | VLM JSON directory | `data/raw/vlms/` |
+| `--clear-cache` | Delete cached intermediate parquet files before running. With no stages given, clears all and exits. | False |
+
+---
+
+## Caching & Resumability
+
+Heavy stages save their intermediate results to parquet so that subsequent runs (or restarts after a crash) skip the expensive recomputation and just re-plot.
+
+| Stage | Cache file (under `outputs/pipeline/<stage>/`) |
+|---|---|
+| `embed` | `pca_coords.parquet` |
+| `cosine` | `cosine_similarity_data.parquet` |
+| `rsa` | `rsa_correlations.parquet` |
+| `judge` | `llm_agreement_scores.parquet` (row-level resume during the LLM loop) |
+
+All writes are atomic (`.tmp` + rename), so a crash mid-save never leaves a corrupt parquet behind.
+
+### Clearing the cache
+
+```powershell
+# Clear every stage's cache and exit
+python -m pipeline --clear-cache
+
+# Clear only specific stages, then re-run them from scratch
+python -m pipeline --clear-cache cosine rsa
+
+# Clear everything, then run the full pipeline fresh
+python -m pipeline --clear-cache --all
+```
+
+`preprocess` and `bias` have no cache — `preprocess`'s output `data/r2_cleaned.csv` already acts as cache for downstream stages, and `bias` is fast enough to redo.
 
 ---
 
@@ -198,26 +229,37 @@ Uses **Block 2, Repetition 1 only** (rating scale questions 6-10).
 ```
 outputs/pipeline/
 ├── embed/
-│   └── pca_by_block_sector.png
+│   ├── pca_by_block_sector.png
+│   └── pca_coords.parquet            # cache
 ├── cosine/
-│   └── cosine_heatmap_grid.png
+│   ├── cosine_heatmap_grid.png
+│   └── cosine_similarity_data.parquet  # cache
 ├── rsa/
-│   └── rsa_heatmap_grid.png
-└── bias/
-    └── bias_violin_distribution.png
+│   ├── rsa_heatmap_grid.png
+│   └── rsa_correlations.parquet      # cache
+├── bias/
+│   └── bias_violin_distribution.png
+└── judge/
+    ├── judge_scores.png
+    ├── llm_agreement_scores.parquet  # cache (row-level resume)
+    ├── comparable_pairs.parquet
+    ├── non_comparable_pairs.parquet
+    ├── comparable_pairs.csv
+    ├── non_comparable_pairs.csv
+    └── summary.json
 ```
 
 ---
 
 ## Agent Ordering Convention
 
-All heatmaps use consistent agent ordering:
+All heatmaps and violin plots use the same agent ordering, defined in [`pipeline/utils/metrics.py:get_ordered_agents`](pipeline/utils/metrics.py):
 
-1. **VLMs** (alphabetically sorted)
-2. **HUMAN_LIMA** (human annotators from Lima)
-3. **HUMAN_NYC** (human annotators from NYC)
+1. **HUMAN_LIMA** (human annotators from Lima)
+2. **HUMAN_NYC** (human annotators from NYC)
+3. **VLMs**
 
-This puts VLM agents first, human baselines at the end for visual comparison.
+Each group is sorted **naturally** (so `human_lima_2` comes before `human_lima_17`, not after). This single helper is consumed by every plotting stage (`cosine`, `rsa`, `judge`, `bias`) so the order is identical across every figure.
 
 ---
 

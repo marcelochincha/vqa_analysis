@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pipeline.config import get_config
 from pipeline.stages import STAGE_RUNNERS
+from pipeline.utils.checkpoint import STAGE_CACHE_FILES, clear_stage_caches
 
 
 def main():
@@ -27,6 +28,11 @@ def main():
     parser.add_argument("--concurrency", type=int, default=16, help="Judge concurrent requests")
     parser.add_argument("--batch-size", type=int, default=128, help="Judge batch size")
     parser.add_argument("--checkpoint-every", type=int, default=10, help="Judge checkpoint cadence in batches")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Delete cached intermediate parquet files before running. With no stages given, clears every stage's cache and exits.",
+    )
     args = parser.parse_args()
 
     if args.list:
@@ -39,15 +45,23 @@ def main():
     if args.all:
         stages = list(STAGE_RUNNERS.keys())
 
-    if not stages:
-        parser.print_help()
-        return 1
-
     config = get_config(
         data_file=args.data,
         embeddings_file=args.embeddings,
         outdir=args.outdir,
     )
+
+    if args.clear_cache:
+        target_stages = stages if stages else list(STAGE_CACHE_FILES.keys())
+        removed = clear_stage_caches(config, target_stages)
+        total = sum(len(v) for v in removed.values())
+        print(f"Cleared {total} cache file(s) across {len(target_stages)} stage(s).")
+        if not stages:
+            return 0
+
+    if not stages:
+        parser.print_help()
+        return 1
 
     results = {}
     for name in stages:

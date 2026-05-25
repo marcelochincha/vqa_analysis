@@ -13,7 +13,7 @@ from scipy.stats import ks_2samp, wasserstein_distance
 from pipeline.config import PipelineConfig
 from pipeline.style import apply_style
 from pipeline.utils.io import load_csv
-from pipeline.utils.metrics import get_video_region, to_numeric
+from pipeline.utils.metrics import get_ordered_agents, get_video_region, to_numeric
 
 
 QUESTIONS = {
@@ -84,12 +84,15 @@ def run(config: PipelineConfig) -> Path:
     stats_df = compute_stats(df_vlms_r1)
     wasserstein_avg = stats_df.groupby("QUESTION_NUM")["WASSERSTEIN_DISTANCE"].mean().reset_index()
 
+    agent_order = get_ordered_agents(df_vlms_r1["AGENT"].unique())
+
     sns.color_palette("deep")
     g = sns.FacetGrid(
         df_vlms_r1,
         row="VIDEO_REGION",
         col="QUESTION_NUM",
         hue="AGENT",
+        hue_order=agent_order,
         height=3,
         aspect=1.2,
         margin_titles=True,
@@ -101,6 +104,7 @@ def run(config: PipelineConfig) -> Path:
         sns.violinplot,
         x="AGENT",
         y="ANSWER",
+        order=agent_order,
         inner="quart",
         cut=0,
         dodge=False,

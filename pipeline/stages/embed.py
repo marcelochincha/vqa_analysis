@@ -9,6 +9,7 @@ from sklearn.decomposition import PCA
 
 from pipeline.config import PipelineConfig
 from pipeline.style import COLORS, apply_style
+from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
 
 
@@ -19,7 +20,7 @@ def get_group_color(agent: str) -> str:
     return "vlm"
 
 
-def run(config: PipelineConfig) -> Path:
+def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
     apply_style()
     data_path = config.resolve(config.data_file)
     embeddings_path = config.resolve(config.embeddings_file)
@@ -30,23 +31,32 @@ def run(config: PipelineConfig) -> Path:
     df["VIDEO_SECTOR"] = df["VIDEO"].apply(lambda x: "Lima" if int(x.split("_")[1]) <= 100 else "NYC")
     df_first = df[df["REPETITION"] == 1].reset_index(drop=True)
 
-    cache = load_embeddings_cache(embeddings_path)
-    embeddings = []
-    for row in df_first.itertuples(index=False):
-        key = (row.AGENT, row.VIDEO, row.QUESTION_NUM, row.REPETITION)
-        if key not in cache:
-            raise KeyError(f"Embedding for key {key} not found")
-        embeddings.append(cache[key])
-    embeddings_arr = np.vstack(embeddings)
+    def _compute_pca() -> pd.DataFrame:
+        cache = load_embeddings_cache(embeddings_path)
+        embeddings = []
+        for row in df_first.itertuples(index=False):
+            key = (row.AGENT, row.VIDEO, row.QUESTION_NUM, row.REPETITION)
+            if key not in cache:
+                raise KeyError(f"Embedding for key {key} not found")
+            embeddings.append(cache[key])
+        embeddings_arr = np.vstack(embeddings)
 
-    coords = np.zeros((len(df_first), 2))
-    for block in sorted(df_first["BLOCK"].unique()):
-        mask = df_first["BLOCK"] == block
-        if mask.any():
-            coords[mask.values] = PCA(n_components=2).fit_transform(embeddings_arr[mask.values])
+        coords = np.zeros((len(df_first), 2))
+        for block in sorted(df_first["BLOCK"].unique()):
+            mask = df_first["BLOCK"] == block
+            if mask.any():
+                coords[mask.values] = PCA(n_components=2).fit_transform(embeddings_arr[mask.values])
 
-    df_plot = df_first.assign(pca_X=coords[:, 0], pca_Y=coords[:, 1])
-    df_plot["group"] = df_plot["AGENT"].map(get_group_color)
+        out = df_first.assign(pca_X=coords[:, 0], pca_Y=coords[:, 1])
+        out["group"] = out["AGENT"].map(get_group_color)
+        return out
+
+    df_plot = cached_dataframe(
+        outdir / "pca_coords.parquet",
+        _compute_pca,
+        force=force_recompute,
+        label="embed",
+    )
 
     sectors = ["Lima", "NYC"]
     blocks = sorted(df_plot["BLOCK"].unique())

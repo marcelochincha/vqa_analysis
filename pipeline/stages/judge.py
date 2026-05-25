@@ -15,8 +15,9 @@ from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
 from pipeline.style import apply_style
+from pipeline.utils.checkpoint import load_dataframe, save_dataframe
 from pipeline.utils.io import load_csv
-from pipeline.utils.metrics import get_video_sector
+from pipeline.utils.metrics import get_ordered_agents, get_video_sector
 # =========================================================
 # QUESTIONS MAP
 # =========================================================
@@ -66,17 +67,26 @@ Determine if Response A and Response B provide claims that can be compared for a
 Rules:
 - Mark as 1 (COMPARABLE) if:
     1. Both responses provide a factual answer to the [Question].
-    2. They describe the same object's state.
-    3. The responses are "on the same page" even if they disagree.
+    2. They describe the same object's state (e.g., if the question asks "What is the car doing?", any description of its motion—turning, stopping, or going straight—is COMPARABLE because these are competing descriptions of the same event).
+    3. The responses are "on the same page" even if they disagree (e.g., "Yes" vs "No").
 
 - Mark as 0 (NOT_COMPARABLE) if:
-    1. The responses talk past each other.
-    2. One response provides facts while the other says "I don't know".
+    1. The responses "talk past each other" (e.g., Question: "What is the car doing?"; A: "It's turning"; B: "It's a blue car"). One describes an action, the other describes an appearance. These are NOT comparable.
+    2. One response provides facts while the other says "I don't know," "I can't see," or is empty.
     3. They discuss different objects entirely.
+
+[Few-Shot Examples]
+Question: "What is the ego vehicle's action?"
+A: "Turning right." | B: "Moving forward." -> 1 (Comparable: These are two different descriptions of the vehicle's trajectory. If one is true, the other is likely false.)
+A: "Braking." | B: "Stopped." -> 1 (Comparable: These both describe the vehicle's speed/state.)
+A: "Accelerating." | B: "The car is black." -> 0 (Not Comparable: A describes motion, B describes color. They do not overlap or conflict.)
+
+Question: "Is there a traffic light?"
+A: "Yes, it is green." | B: "No." -> 1 (Comparable: One confirms existence, the other denies it.)
 
 Output ONLY valid JSON:
 {
-  "Evaluation": "Brief reasoning",
+  "Evaluation": "Briefly explain your reasoning.",
   "Score": 1 | 0
 }
 """
@@ -92,15 +102,43 @@ You are a strict and impartial evaluator of factual alignment.
 Task:
 Compare the semantic agreement between Response A and Response B regarding the [Question].
 
+Rules:
+1. **Conclusion Priority:** If both responses reach the same core conclusion (e.g., both say "Yes," both say "Safe," or both identify the same action like "Braking"), you MUST score +2.
+2. **The "Zoom" Rule (Specificity):** Do not penalize for detail. "A vehicle" and "A red Toyota" are a perfect match (+2) because they describe the same entity without contradiction.
+3. **The "Bonus Fact" Rule (+1):** Use +1 ONLY if the responses agree on the core answer, but one response includes an *additional, separate factual claim* that the other does not mention (e.g., A: "The light is red"; B: "The light is red and there is a pedestrian").
+4. **Contradictions:** Use negative scores if the responses make claims that cannot both be true.
+
 Scoring Scale:
-+2 Strong Agreement
-+1 Partial Agreement
--1 Partial Contradiction
--2 Direct Contradiction
++2 (Strong Agreement): Same core conclusion. This includes cases where one is simply more specific/descriptive than the other (e.g., "moving" vs "accelerating").
++1 (Partial Agreement): Agreement on the core fact, but one response mentions an additional, unrelated detail about the scene that the other omits.
+-1 (Partial Contradiction): Agreement on the object/action, but a disagreement on the *degree* or *intensity* (e.g., "moving fast" vs "moving slowly").
+-2 (Direct Contradiction): Logically opposite claims (e.g., "Turning" vs "Straight", "Red" vs "Green", "Yes" vs "No").
+
+[Few-Shot Examples]
+
+Question: "What is the ego vehicle doing?"
+A: "It is moving." | B: "The vehicle is accelerating forward."
+-> Score: 2 (Reason: Both agree on the core action of motion. B is just more specific).
+
+Question: "Is there a car in front?"
+A: "Yes." | B: "Yes, and it is a blue truck."
+-> Score: 2 (Reason: The core conclusion to the question is identical).
+
+Question: "What is the traffic light color?"
+A: "Red." | B: "Red. Also, the road is wet."
+-> Score: 1 (Reason: They agree on the light, but B adds a separate fact about the weather/road).
+
+Question: "How is the car moving?"
+A: "Moving fast." | B: "Moving slowly."
+-> Score: -1 (Reason: They agree it is moving, but contradict on the degree of speed).
+
+Question: "What is the ego vehicle's action?"
+A: "Turning right." | B: "Moving forward in the middle lane."
+-> Score: -2 (Reason: These are mutually exclusive trajectories).
 
 Output ONLY valid JSON:
 {
-  "Evaluation": "Brief reasoning",
+  "Evaluation": "Briefly explain your reasoning.",
   "Score": 2 | 1 | -1 | -2
 }
 """
@@ -113,12 +151,8 @@ Output ONLY valid JSON:
 USER_TEMPLATE = """
 Input:
 [Question]: {question}
-
-[Response A]:
-{res_a}
-
-[Response B]:
-{res_b}
+[Response A]: {res_a}
+[Response B]: {res_b}
 """
 
 
@@ -214,7 +248,11 @@ async def judge_row_answers_async(
             },
         ],
         "temperature": temperature,
+        "top_p": 0.95,
+        "presence_penalty": 1.5,
+        "top_k": 20,
         "max_tokens": max_tokens,
+        "chat_template_kwargs": {"enable_thinking": True},
     }
 
     response = await client.post(
@@ -526,17 +564,13 @@ async def score_dataframe_async(
                 f"Saving checkpoint batch {batch_i}"
             )
 
-            df.to_parquet(
-                checkpoint_path
-            )
+            save_dataframe(df, checkpoint_path)
 
     # =====================================================
     # FINAL SAVE
     # =====================================================
 
-    df.to_parquet(
-        checkpoint_path
-    )
+    save_dataframe(df, checkpoint_path)
 
     return df
 
@@ -644,7 +678,7 @@ def run(
     model: str = "Qwen/Qwen3-4B",
     base_url: str = "http://localhost:8000/v1",
     api_key: str = "EMPTY",
-    temperature: float = 0.6,
+    temperature: float = 1.0,
     max_tokens: int = 32768,
     concurrency: int = 16,
     batch_size: int = 128,
@@ -722,14 +756,12 @@ def run(
     # LOAD OR BUILD CHECKPOINT
     # =====================================================
 
-    if checkpoint_path.exists():
+    df_comp = load_dataframe(checkpoint_path)
+
+    if df_comp is not None:
 
         print(
-            f"Loading checkpoint: {checkpoint_path}"
-        )
-
-        df_comp = pd.read_parquet(
-            checkpoint_path
+            f"Loading checkpoint: {checkpoint_path} ({len(df_comp)} rows)"
         )
 
     else:
@@ -754,6 +786,7 @@ def run(
             on=[
                 "VIDEO",
                 "QUESTION_NUM",
+                "QUESTION",
                 "VIDEO_SECTOR",
                 "BLOCK",
             ],
@@ -869,13 +902,8 @@ def run(
     # SAVE DATA
     # =====================================================
 
-    comparable_df.to_parquet(
-        outdir / "comparable_pairs.parquet"
-    )
-
-    non_comparable_df.to_parquet(
-        outdir / "non_comparable_pairs.parquet"
-    )
+    save_dataframe(comparable_df, outdir / "comparable_pairs.parquet")
+    save_dataframe(non_comparable_df, outdir / "non_comparable_pairs.parquet")
 
     comparable_df.to_csv(
         outdir / "comparable_pairs.csv",
@@ -969,7 +997,7 @@ def run(
 
     plot_judge(
         agg_df2,
-        agents=df_answers["AGENT"].unique(),
+        agents=get_ordered_agents(df_answers["AGENT"].unique()),
         df_answers=df_answers,
         out_path=out_path,
     )
