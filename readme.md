@@ -126,6 +126,18 @@ bash run_judge.sh
 | `--batch-size` | Rows scored per batch | `128` |
 | `--checkpoint-every` | Save the parquet checkpoint every N batches | `10` |
 
+#### Quick smoke test
+
+Before launching a full ~100k-pair run, validate end-to-end with a 3-pair sample against your live vLLM:
+
+```powershell
+python scripts/smoke_test_judge.py
+```
+
+Builds a tiny dataset (1 video × 1 question × 3 agents = 3 unique pairs), runs `judge.run()` end-to-end, then asserts that the parquet was written, all stage scores landed in the valid value sets, and the model's `<think>` reasoning was captured. Prints one full row at the end so you can eyeball the comparison quality. Takes ~30 seconds.
+
+Use it whenever you change prompts, sampling params, or the served model.
+
 #### Resume after a crash
 
 Judge writes `outputs/pipeline/judge/llm_agreement_scores.parquet` every `--checkpoint-every` batches (atomic save). If the process dies mid-run, just re-invoke `python -m pipeline judge ...` — it loads the checkpoint and resumes from the first row without `STAGE1_SCORE` / `STAGE2_SCORE`. **No flags needed for resume — it's automatic.**

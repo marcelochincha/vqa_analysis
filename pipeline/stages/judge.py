@@ -197,7 +197,7 @@ def extract_json_dict(text: str) -> dict:
         ).strip()
 
     try:
-        return json.loads(text)
+        return json.loads(text, strict=False)
 
     except Exception:
 
@@ -212,7 +212,8 @@ def extract_json_dict(text: str) -> dict:
             )
 
         return json.loads(
-            match.group(0)
+            match.group(0),
+            strict=False,
         )
 
 
