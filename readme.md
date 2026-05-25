@@ -9,7 +9,9 @@ cd F:\robusto\vqa_analysis
 python -m pipeline --all
 ```
 
-This runs all 5 stages in sequence: `preprocess` → `embed` → `cosine` → `rsa` → `bias`
+This runs all 6 stages in sequence: `preprocess` → `embed` → `cosine` → `rsa` → `bias` → `judge`
+
+> ⚠️ `judge` requires a vLLM server running on `--base-url`. If you don't have one up, either skip it (`python -m pipeline preprocess embed cosine rsa bias`) or start vLLM first — see [Run the LLM Judge](#run-the-llm-judge) below.
 
 Note: this assumes you already have the preprocessed CSV and an embeddings cache. See the Full setup section below for the end-to-end workflow.
 
@@ -58,28 +60,91 @@ python -m pipeline --all \
     --progress
 ```
 
-### Run judge with vLLM (engine + judge)
+### Run the LLM Judge
 
-Run vLLM in one terminal:
+The `judge` stage scores pairwise agreement between every two agents' answers for the same `(VIDEO, QUESTION_NUM)`. Internally it runs **two LLM passes per pair**:
+
+1. **Stage 1 — Comparability filter:** asks the LLM whether the two answers can be meaningfully compared. Score `1` = comparable, `0` = talking past each other.
+2. **Stage 2 — Agreement score:** only for pairs that passed Stage 1, asks the LLM to score `+2 / +1 / -1 / -2` on the scale of strong agreement to direct contradiction.
+
+The prompts (with few-shot examples) and sampling params (`temperature=1.0`, `top_p=0.95`, `top_k=20`, `presence_penalty=1.5`, `enable_thinking=true`) match the source notebooks in [src/llm_judge_tests_stage1.ipynb](src/llm_judge_tests_stage1.ipynb) and [src/llm_judge_tests_stage2.ipynb](src/llm_judge_tests_stage2.ipynb).
+
+**Dependency:** the judge needs the questions text in [`final_questions_v3.yaml`](final_questions_v3.yaml) at the workspace root.
+
+#### Step 1 — Start a vLLM server
+
+In one terminal:
 
 ```bash
 conda activate vqa-vllm
 bash scripts/bash.sh
 ```
 
-Then run judge in another terminal:
+This serves `Qwen/Qwen3-4B` on `http://localhost:8000/v1` by default. Override via env vars (`MODEL`, `PORT`, `GPU_MEMORY_UTILIZATION`, `MAX_MODEL_LEN`, `TENSOR_PARALLEL`).
+
+#### Step 2 — Run the judge stage
+
+The bundled helper:
 
 ```bash
 bash run_judge.sh
 ```
 
-You can override model and base URL via env vars:
+Or directly via the CLI:
+
+```powershell
+python -m pipeline judge `
+    --data data/r2_cleaned.csv `
+    --model Qwen/Qwen3-4B `
+    --base-url http://localhost:8000/v1 `
+    --temperature 1.0 `
+    --concurrency 256 `
+    --batch-size 512 `
+    --checkpoint-every 2
+```
+
+Override via env vars when using the helper:
 
 ```bash
 BASE_URL=http://localhost:8000/v1 \
 MODEL=Qwen/Qwen3-4B \
+CONCURRENCY=256 \
+BATCH_SIZE=512 \
 bash run_judge.sh
 ```
+
+#### Judge-specific CLI flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--model` | LLM served by vLLM | `Qwen/Qwen3-4B` |
+| `--base-url` | OpenAI-compatible endpoint | `http://localhost:8000/v1` |
+| `--api-key` | API key (vLLM ignores it, but the client requires something) | `EMPTY` |
+| `--temperature` | Sampling temperature | `1.0` |
+| `--max-tokens` | Max **output** tokens per call. Must be `<` vLLM's `--max-model-len` minus your longest input prompt. | `8192` |
+| `--concurrency` | Async requests in flight | `16` |
+| `--batch-size` | Rows scored per batch | `128` |
+| `--checkpoint-every` | Save the parquet checkpoint every N batches | `10` |
+
+#### Resume after a crash
+
+Judge writes `outputs/pipeline/judge/llm_agreement_scores.parquet` every `--checkpoint-every` batches (atomic save). If the process dies mid-run, just re-invoke `python -m pipeline judge ...` — it loads the checkpoint and resumes from the first row without `STAGE1_SCORE` / `STAGE2_SCORE`. **No flags needed for resume — it's automatic.**
+
+To force a clean re-run (e.g., after changing prompts or sampling params), delete the checkpoint first:
+
+```powershell
+python -m pipeline --clear-cache judge
+```
+
+#### Judge outputs
+
+Under `outputs/pipeline/judge/`:
+
+- `llm_agreement_scores.parquet` — full per-pair scores (Stage 1 + Stage 2 + reasoning)
+- `comparable_pairs.parquet` / `.csv` — pairs where `STAGE1_SCORE == 1`
+- `non_comparable_pairs.parquet` / `.csv` — pairs where `STAGE1_SCORE == 0`
+- `summary.json` — totals, comparable ratio, agreement mean/std
+- `judge_scores.png` — heatmap grid (agent × agent, per block × sector)
 
 ### Optional: single command for embeddings + pipeline
 
@@ -174,6 +239,14 @@ python -m pipeline bias --data data/r2_cleaned.csv
 ```
 
 Uses **Block 2, Repetition 1 only** (rating scale questions 6-10).
+
+### 6. Judge (LLM-as-a-Judge agreement scores)
+
+```powershell
+python -m pipeline judge --data data/r2_cleaned.csv --base-url http://localhost:8000/v1 --model Qwen/Qwen3-4B
+```
+
+Requires a running vLLM server. See [Run the LLM Judge](#run-the-llm-judge) for the full workflow, all flags, and resume behavior.
 
 ---
 

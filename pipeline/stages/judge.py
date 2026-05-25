@@ -679,7 +679,7 @@ def run(
     base_url: str = "http://localhost:8000/v1",
     api_key: str = "EMPTY",
     temperature: float = 1.0,
-    max_tokens: int = 32768,
+    max_tokens: int = 8192,
     concurrency: int = 16,
     batch_size: int = 128,
     checkpoint_every_batches: int = 10,
