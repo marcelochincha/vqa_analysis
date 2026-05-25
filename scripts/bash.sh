@@ -22,4 +22,5 @@ exec vllm serve "$MODEL" \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --max-model-len "$MAX_MODEL_LEN" \
   --dtype "$DTYPE" \
+  --reasoning-parser qwen3 \
   "${EXTRA_ARGS[@]}"
