@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.decomposition import PCA
 
 from pipeline.config import PipelineConfig
-from pipeline.style import COLORS, apply_style
+from pipeline.style import COLORS, apply_style, save_figure
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
 
@@ -111,6 +111,6 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
     )
     fig.suptitle("PCA by Block and Sector - Embeddings", fontsize=24, weight="bold")
     out_path = outdir / "pca_by_block_sector.png"
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    save_figure(fig, out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return out_path

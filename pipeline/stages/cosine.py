@@ -10,7 +10,7 @@ from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import apply_style
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
 from pipeline.utils.metrics import assign_block, get_ordered_agents, get_video_sector
@@ -91,7 +91,7 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
     elif nrows == 1 or ncols == 1:
         axes = axes.reshape(nrows, ncols)
 
-    cmap = sns.diverging_palette(220, 20, as_cmap=True)
+    cmap = DIVERGING_CMAP
     for i, sector in enumerate(sectors):
         for j, block in enumerate(blocks):
             ax = axes[i, j]
@@ -118,6 +118,6 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
     fig.suptitle("Cosine similarity heatmaps by block and region", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "cosine_heatmap_grid.png"
-    fig.savefig(out_path, dpi=300)
+    save_figure(fig, out_path, dpi=300)
     plt.close(fig)
     return out_path

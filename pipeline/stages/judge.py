@@ -14,7 +14,7 @@ import yaml
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import apply_style
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
 from pipeline.utils.checkpoint import load_dataframe, save_dataframe
 from pipeline.utils.io import load_csv
 from pipeline.utils.metrics import get_ordered_agents, get_video_sector
@@ -612,11 +612,7 @@ def plot_judge(
         sharey=True,
     )
 
-    cmap = sns.diverging_palette(
-        220,
-        20,
-        as_cmap=True,
-    )
+    cmap = DIVERGING_CMAP
 
     for id_r, region in enumerate(
         df_answers["VIDEO_SECTOR"].unique()[::-1]
@@ -681,7 +677,8 @@ def plot_judge(
 
     fig.tight_layout()
 
-    fig.savefig(
+    save_figure(
+        fig,
         out_path,
         dpi=300,
         bbox_inches="tight",

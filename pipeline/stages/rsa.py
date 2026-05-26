@@ -10,7 +10,7 @@ from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import apply_style
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
 from pipeline.utils.metrics import get_ordered_agents
@@ -110,7 +110,7 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
     elif nrows == 1 or ncols == 1:
         axes = axes.reshape(nrows, ncols)
 
-    cmap = sns.diverging_palette(220, 20, as_cmap=True)
+    cmap = DIVERGING_CMAP
     for id_r, region in enumerate(sectors):
         for id_b, block in enumerate(blocks):
             ax = axes[id_r, id_b]
@@ -136,6 +136,6 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
     fig.suptitle("RSA analysis - Representational Similarity Analysis", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "rsa_heatmap_grid.png"
-    fig.savefig(out_path, dpi=300) #, bbox_inches="tight")
+    save_figure(fig, out_path, dpi=300)
     plt.close(fig)
     return out_path

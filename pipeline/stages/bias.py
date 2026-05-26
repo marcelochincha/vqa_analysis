@@ -11,7 +11,7 @@ from matplotlib.lines import Line2D
 from scipy.stats import ks_2samp, wasserstein_distance
 
 from pipeline.config import PipelineConfig
-from pipeline.style import apply_style
+from pipeline.style import apply_style, save_figure
 from pipeline.utils.io import load_csv
 from pipeline.utils.metrics import get_ordered_agents, get_video_region, to_numeric
 
@@ -211,6 +211,6 @@ def run(config: PipelineConfig) -> Path:
         )
 
     out_path = outdir / "bias_violin_distribution.png"
-    g.figure.savefig(out_path, dpi=150, bbox_inches="tight")
+    save_figure(g.figure, out_path, dpi=150, bbox_inches="tight")
     plt.close(g.figure)
     return out_path
