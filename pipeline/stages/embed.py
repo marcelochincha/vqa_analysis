@@ -11,6 +11,7 @@ from pipeline.config import PipelineConfig
 from pipeline.style import COLORS, apply_style, save_figure
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
+from pipeline.utils.metrics import get_ordered_agents
 
 
 def get_group_color(agent: str) -> str:
@@ -69,6 +70,7 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
     x_pad = (max_x - min_x) * 0.05
     y_pad = (max_y - min_y) * 0.05
 
+    agent_order = get_ordered_agents(df_plot["AGENT"].unique())
     handles_dict = {}
     for i, sector in enumerate(sectors):
         for j, block in enumerate(blocks):
@@ -78,8 +80,10 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
                 ax.set_title(f"Block {block} - {sector}\n(Sin datos)")
                 ax.axis("off")
                 continue
-            for agent in df_subset["AGENT"].unique():
+            for agent in agent_order:
                 mask = df_subset["AGENT"] == agent
+                if not mask.any():
+                    continue
                 group = df_subset.loc[mask, "group"].iloc[0]
                 sc = ax.scatter(
                     df_subset.loc[mask, "pca_X"],
@@ -91,7 +95,7 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
                     s=30,
                     linewidth=0.5,
                 )
-                handles_dict[agent] = sc
+                handles_dict.setdefault(agent, sc)
             ax.set_title(f"Block {block} - {sector}", weight="bold", fontsize=14)
             ax.set_xlabel("PC 1")
             ax.set_ylabel("PC 2")
