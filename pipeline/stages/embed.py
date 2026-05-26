@@ -70,7 +70,12 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
     x_pad = (max_x - min_x) * 0.05
     y_pad = (max_y - min_y) * 0.05
 
-    agent_order = get_ordered_agents(df_plot["AGENT"].unique())
+    legend_order = get_ordered_agents(df_plot["AGENT"].unique())
+    # Draw humans first so VLM points land ON TOP — independent of the legend order above.
+    plot_order = (
+        [a for a in legend_order if "human" in a.lower()]
+        + [a for a in legend_order if "human" not in a.lower()]
+    )
     handles_dict = {}
     for i, sector in enumerate(sectors):
         for j, block in enumerate(blocks):
@@ -80,7 +85,7 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
                 ax.set_title(f"Block {block} - {sector}\n(Sin datos)")
                 ax.axis("off")
                 continue
-            for agent in agent_order:
+            for agent in plot_order:
                 mask = df_subset["AGENT"] == agent
                 if not mask.any():
                     continue
@@ -103,9 +108,11 @@ def run(config: PipelineConfig, force_recompute: bool = False) -> Path:
             ax.set_ylim(min_y - y_pad, max_y + y_pad)
             ax.grid(True, alpha=0.3)
 
+    ordered_handles = [handles_dict[a] for a in legend_order if a in handles_dict]
+    ordered_labels = [a for a in legend_order if a in handles_dict]
     fig.legend(
-        handles=list(handles_dict.values()),
-        labels=list(handles_dict.keys()),
+        handles=ordered_handles,
+        labels=ordered_labels,
         loc="center right",
         frameon=True,
         bbox_to_anchor=(1.03, 0.5),
