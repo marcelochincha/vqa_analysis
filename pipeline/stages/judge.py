@@ -885,16 +885,18 @@ def run(
         else None
     )
 
-    client = httpx.AsyncClient(
-        base_url=base_url,
-        headers=headers,
-        timeout=None,
-    )
-
-    try:
-
-        df_comp = asyncio.run(
-            score_dataframe_async(
+    # Create the client and run the scoring inside a single event loop —
+    # otherwise client.aclose() runs on a fresh loop and the transport's
+    # original loop is already closed, raising "Event loop is closed" and
+    # skipping the split / summary / plot below.
+    async def _run_scoring() -> pd.DataFrame:
+        client = httpx.AsyncClient(
+            base_url=base_url,
+            headers=headers,
+            timeout=None,
+        )
+        try:
+            return await score_dataframe_async(
                 df_comp,
                 str(checkpoint_path),
                 client,
@@ -906,13 +908,10 @@ def run(
                 checkpoint_every_batches=checkpoint_every_batches,
                 max_retries=max_retries,
             )
-        )
+        finally:
+            await client.aclose()
 
-    finally:
-
-        asyncio.run(
-            client.aclose()
-        )
+    df_comp = asyncio.run(_run_scoring())
 
     # =====================================================
     # SPLIT DATAFRAMES (three categories — pending is separate
