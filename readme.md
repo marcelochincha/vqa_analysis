@@ -27,7 +27,7 @@ All operational tasks are wrapped in bash scripts you can drive entirely with en
 | 2 | [`scripts/run_all.sh`](scripts/run_all.sh) | Optional preprocess → embeddings → all pipeline stages (`embed` / `cosine` / `rsa` / `bias` / `judge`). |
 | 3 | [`scripts/bash.sh`](scripts/bash.sh) | Start the vLLM server that the `judge` stage talks to. **Runs in its own terminal.** |
 | 4 | [`scripts/run_judge.sh`](scripts/run_judge.sh) | Run *only* the `judge` stage (handy when vLLM goes up after the other stages, or when iterating on judge params). |
-| 5 | [`scripts/package_cache.sh`](scripts/package_cache.sh) | Bundle inputs + cached parquets + embeddings into a tarball for replication on another machine. |
+| 5 | [`scripts/package_cache.sh`](scripts/package_cache.sh) | Bundle full `data/`, `external_embeds/`, and `outputs/` (plots, parquets, CSVs) into a tarball — recipient extracts and has a fully reproducible state. |
 
 Each script reads env vars with sane defaults. Override per invocation with `VAR=value bash script.sh`.
 
@@ -153,7 +153,7 @@ Any extra CLI flag (`--agents ...`, `--temperature ...`) appended after the scri
 
 ### 5. Package the cache — `bash scripts/package_cache.sh`
 
-Bundles inputs (`data/r2_cleaned.csv`, raw sources, `final_questions_v3.yaml`), all top-level embedding caches, and every stage's parquet checkpoint into a `.tar.gz`. Reduce re-replication on another machine to: extract → run the same `bash` commands above; everything cached is reused.
+Bundles the full `data/`, `external_embeds/`, and `outputs/` directories (raw sources, cleaned CSVs, every embedding cache, every parquet checkpoint, every rendered plot — PNG/SVG), plus `final_questions_v3.yaml`, into a `.tar.gz`. Recipient extracts and has a fully reproducible state — no stage needs to be re-run. Legacy `*/old/` dirs and `__pycache__` are excluded.
 
 ```bash
 bash scripts/package_cache.sh                       # default path: ./robusto_cache_<timestamp>.tar.gz
@@ -558,16 +558,16 @@ outputs/pipeline/
 
 ## Packaging the cache for reuse
 
-To bundle inputs + cached artifacts (preprocessed CSV, embedding caches, parquet checkpoints — *especially the judge checkpoint*) so you or someone else can replicate the pipeline locally without re-running the slow stages:
+To bundle everything needed to reproduce results bit-for-bit on another machine — inputs, embeddings, **and every rendered output** (plots + parquets + CSVs + JSONs across every experiment subdir) — so the recipient never has to re-run any stage:
 
 ```bash
 bash scripts/package_cache.sh                       # writes robusto_cache_<timestamp>.tar.gz at repo root
 bash scripts/package_cache.sh /path/to/output.tar.gz
 ```
 
-The archive includes `data/r2_cleaned.csv`, `data/raw/`, `final_questions_v3.yaml`, all top-level `external_embeds/*.pkl`, and every `outputs/pipeline/**/*.parquet`. It excludes plots (regenerable), `*/old/` dirs, `venv/`, `__pycache__/`, `.git/`.
+The archive includes the full `data/`, `external_embeds/`, and `outputs/` trees plus `final_questions_v3.yaml`. Legacy `*/old/` dirs, `__pycache__/`, and `*.pyc` are excluded; `venv/` and `.git/` are never touched because they're outside the listed paths.
 
-To restore on another machine: extract at the repo root, then run any stage — the resume logic will skip everything already cached.
+To restore on another machine: extract at the repo root and you're done. Re-running a stage with new code is optional — the resume / cache logic picks up the existing artifacts.
 
 ---
 
