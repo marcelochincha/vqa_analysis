@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--concurrency", type=int, default=16, help="Judge concurrent requests")
     parser.add_argument("--batch-size", type=int, default=128, help="Judge batch size")
     parser.add_argument("--checkpoint-every", type=int, default=10, help="Judge checkpoint cadence in batches")
+    parser.add_argument("--max-retries", type=int, default=3, help="Judge retries per call on failure (exponential backoff)")
+    parser.add_argument("--agents", nargs="*", default=None, help="Restrict judge to these agents only (test mode — outputs get a _test suffix to avoid clobbering full-run artifacts)")
     parser.add_argument(
         "--clear-cache",
         action="store_true",
@@ -82,6 +84,8 @@ def main():
                     concurrency=args.concurrency,
                     batch_size=args.batch_size,
                     checkpoint_every_batches=args.checkpoint_every,
+                    max_retries=args.max_retries,
+                    agents=args.agents,
                 )
             elif name == "preprocess":
                 result = runner(config, human_csv=args.human_csv, vlm_dir=args.vlm_dir)

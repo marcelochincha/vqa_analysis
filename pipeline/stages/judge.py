@@ -290,53 +290,62 @@ async def run_stage(
     temperature,
     max_tokens,
     system_prompt,
+    max_retries: int = 3,
+    base_delay: float = 2.0,
 ):
+
+    ctx = (
+        f"{row.get('AGENT_I')}|{row.get('AGENT_J')}"
+        f"|{row.get('VIDEO')}|Q{row.get('QUESTION_NUM')}"
+    )
 
     async with sem:
 
-        try:
+        last_err = None
 
-            result_payload = await judge_row_answers_async(
-                row=row,
-                client=client,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system_prompt=system_prompt,
-            )
+        for attempt in range(1, max_retries + 1):
 
-            result = extract_json_dict(
-                result_payload["raw_output"] or ""
-            )
+            try:
 
-            score = result.get(
-                "Score",
-                np.nan,
-            )
+                result_payload = await judge_row_answers_async(
+                    row=row,
+                    client=client,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    system_prompt=system_prompt,
+                )
 
-            evaluation = result.get(
-                "Evaluation",
-                "",
-            )
+                result = extract_json_dict(
+                    result_payload["raw_output"] or ""
+                )
 
-            reasoning = result_payload.get(
-                "reasoning_content",
-                "",
-            )
+                score = result.get("Score", np.nan)
+                evaluation = result.get("Evaluation", "")
+                reasoning = result_payload.get("reasoning_content", "")
 
-        except Exception as e:
+                return score, evaluation, reasoning
 
-            print(f"ERROR: {e}")
+            except Exception as e:
 
-            score = np.nan
-            evaluation = ""
-            reasoning = ""
+                last_err = e
 
-    return (
-        score,
-        evaluation,
-        reasoning,
-    )
+                if attempt < max_retries:
+
+                    delay = base_delay * (2 ** (attempt - 1))
+
+                    print(
+                        f"RETRY {attempt}/{max_retries} "
+                        f"({type(e).__name__}): {e!r} | {ctx} | wait {delay}s"
+                    )
+
+                    await asyncio.sleep(delay)
+
+        print(
+            f"GAVE UP ({type(last_err).__name__}): {last_err!r} | {ctx}"
+        )
+
+    return np.nan, "", ""
 
 
 # =========================================================
@@ -353,6 +362,7 @@ async def score_dataframe_async(
     concurrency: int = 16,
     batch_size: int = 128,
     checkpoint_every_batches: int = 10,
+    max_retries: int = 3,
 ):
 
     sem = asyncio.Semaphore(concurrency)
@@ -431,6 +441,7 @@ async def score_dataframe_async(
                         temperature=temperature,
                         max_tokens=max_tokens,
                         system_prompt=JUDGE_TEMPLATE_STAGE1,
+                        max_retries=max_retries,
                     )
                     for row in rows_need_stage1
                 )
@@ -498,6 +509,7 @@ async def score_dataframe_async(
                         temperature=temperature,
                         max_tokens=max_tokens,
                         system_prompt=JUDGE_TEMPLATE_STAGE2,
+                        max_retries=max_retries,
                     )
                     for _, row in comparable_rows
                 )
@@ -684,6 +696,8 @@ def run(
     concurrency: int = 16,
     batch_size: int = 128,
     checkpoint_every_batches: int = 10,
+    max_retries: int = 3,
+    agents: list[str] | None = None,
 ) -> Path:
 
     data_path = config.resolve(
@@ -694,9 +708,12 @@ def run(
         "judge"
     )
 
+    # Isolate test runs (with --agents filter) from full-run artifacts.
+    suffix = "_test" if agents else ""
+
     checkpoint_path = (
         outdir
-        / "llm_agreement_scores.parquet"
+        / f"llm_agreement_scores{suffix}.parquet"
     )
 
     outdir.mkdir(
@@ -720,6 +737,19 @@ def run(
     df_answers = df_answers[
         df_answers["BLOCK"] != 2
     ].reset_index(drop=True)
+
+    if agents:
+        df_answers = df_answers[
+            df_answers["AGENT"].isin(agents)
+        ].reset_index(drop=True)
+        print(
+            f"Filtered to {len(df_answers)} rows "
+            f"across {df_answers['AGENT'].nunique()} agent(s): {agents}"
+        )
+        if df_answers["AGENT"].nunique() < 2:
+            raise ValueError(
+                "Need at least 2 distinct agents present in the data to form pairs."
+            )
 
     if "QUESTION" not in df_answers.columns:
         questions_path = (
@@ -874,6 +904,7 @@ def run(
                 concurrency=concurrency,
                 batch_size=batch_size,
                 checkpoint_every_batches=checkpoint_every_batches,
+                max_retries=max_retries,
             )
         )
 
@@ -884,35 +915,46 @@ def run(
         )
 
     # =====================================================
-    # SPLIT DATAFRAMES
+    # SPLIT DATAFRAMES (three categories — pending is separate
+    # so failed/unprocessed rows do not pollute non_comparable)
     # =====================================================
 
-    df_comp["IS_COMPARABLE"] = (
-        df_comp["STAGE1_SCORE"] == 1
+    mask_comparable = df_comp["STAGE1_SCORE"] == 1
+    mask_non_comparable = df_comp["STAGE1_SCORE"] == 0
+    mask_pending = df_comp["STAGE1_SCORE"].isna()
+
+    df_comp["IS_COMPARABLE"] = mask_comparable
+
+    comparable_df = df_comp[mask_comparable].copy()
+    non_comparable_df = df_comp[mask_non_comparable].copy()
+    pending_df = df_comp[mask_pending].copy()
+
+    print(
+        f"Split: comparable={len(comparable_df)} "
+        f"non_comparable={len(non_comparable_df)} "
+        f"pending/failed={len(pending_df)}"
     )
-
-    comparable_df = df_comp[
-        df_comp["IS_COMPARABLE"]
-    ].copy()
-
-    non_comparable_df = df_comp[
-        ~df_comp["IS_COMPARABLE"]
-    ].copy()
 
     # =====================================================
     # SAVE DATA
     # =====================================================
 
-    save_dataframe(comparable_df, outdir / "comparable_pairs.parquet")
-    save_dataframe(non_comparable_df, outdir / "non_comparable_pairs.parquet")
+    save_dataframe(comparable_df, outdir / f"comparable_pairs{suffix}.parquet")
+    save_dataframe(non_comparable_df, outdir / f"non_comparable_pairs{suffix}.parquet")
+    save_dataframe(pending_df, outdir / f"pending_pairs{suffix}.parquet")
 
     comparable_df.to_csv(
-        outdir / "comparable_pairs.csv",
+        outdir / f"comparable_pairs{suffix}.csv",
         index=False,
     )
 
     non_comparable_df.to_csv(
-        outdir / "non_comparable_pairs.csv",
+        outdir / f"non_comparable_pairs{suffix}.csv",
+        index=False,
+    )
+
+    pending_df.to_csv(
+        outdir / f"pending_pairs{suffix}.csv",
         index=False,
     )
 
@@ -954,7 +996,7 @@ def run(
     }
 
     with open(
-        outdir / "summary.json",
+        outdir / f"summary{suffix}.json",
         "w",
     ) as f:
 
@@ -994,7 +1036,7 @@ def run(
     # PLOT
     # =====================================================
 
-    out_path = outdir / "judge_scores.png"
+    out_path = outdir / f"judge_scores{suffix}.png"
 
     plot_judge(
         agg_df2,
