@@ -51,7 +51,7 @@ def get_ordered_agents(agents) -> list[str]:
     human_lima = sorted((a for a in agents if "human" in a.lower() and "lima" in a.lower()), key=_natural_key)
     human_nyc = sorted((a for a in agents if "human" in a.lower() and "nyc" in a.lower()), key=_natural_key)
     vlms = sorted((a for a in agents if "human" not in a.lower()), key=_natural_key)
-    return human_lima + human_nyc + vlms
+    return vlms + human_lima + human_nyc
 
 
 def get_video_sector(video_str: str) -> str:

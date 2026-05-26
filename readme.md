@@ -539,7 +539,9 @@ outputs/pipeline/
 │   ├── rsa_heatmap_grid.png
 │   └── rsa_correlations.parquet      # cache
 ├── bias/
-│   └── bias_violin_distribution.png
+│   ├── bias_violin_distribution.png         # original: per-agent color + legend
+│   ├── bias_violin_distribution_numbered.png # uniform color + numbered x-ticks (use bias_agent_order.csv to decode)
+│   └── bias_agent_order.csv                 # mapping NUMBER -> AGENT for the numbered variant
 └── judge/
     ├── judge_scores.png
     ├── llm_agreement_scores.parquet  # cache (row-level resume)
@@ -573,9 +575,9 @@ To restore on another machine: extract at the repo root, then run any stage — 
 
 All heatmaps and violin plots use the same agent ordering, defined in [`pipeline/utils/metrics.py:get_ordered_agents`](pipeline/utils/metrics.py):
 
-1. **HUMAN_LIMA** (human annotators from Lima)
-2. **HUMAN_NYC** (human annotators from NYC)
-3. **VLMs**
+1. **VLMs**
+2. **HUMAN_LIMA** (human annotators from Lima)
+3. **HUMAN_NYC** (human annotators from NYC)
 
 Each group is sorted **naturally** (so `human_lima_2` comes before `human_lima_17`, not after). This single helper is consumed by every plotting stage (`cosine`, `rsa`, `judge`, `bias`) so the order is identical across every figure.
 

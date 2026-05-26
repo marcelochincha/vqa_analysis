@@ -86,22 +86,39 @@ def run(config: PipelineConfig) -> Path:
 
     agent_order = get_ordered_agents(df_vlms_r1["AGENT"].unique())
 
-    sns.color_palette("deep")
-    g = sns.FacetGrid(
-        df_vlms_r1,
+    # Persist the numeric ordering so the numbered variant is interpretable.
+    order_df = pd.DataFrame({"NUMBER": range(1, len(agent_order) + 1), "AGENT": agent_order})
+    order_df.to_csv(outdir / "bias_agent_order.csv", index=False)
+
+    out_path = _render(df_vlms_r1, human_consensus, agent_order, wasserstein_avg, outdir, numbered=False)
+    _render(df_vlms_r1, human_consensus, agent_order, wasserstein_avg, outdir, numbered=True)
+    return out_path
+
+
+def _render(
+    df_vlms_r1: pd.DataFrame,
+    human_consensus: pd.DataFrame,
+    agent_order: list,
+    wasserstein_avg: pd.DataFrame,
+    outdir: Path,
+    *,
+    numbered: bool,
+) -> Path:
+    facet_kwargs = dict(
         row="VIDEO_REGION",
         col="QUESTION_NUM",
-        hue="AGENT",
-        hue_order=agent_order,
         height=3,
         aspect=1.2,
         margin_titles=True,
         sharey=True,
         sharex=True,
     )
+    if not numbered:
+        facet_kwargs.update(hue="AGENT", hue_order=agent_order)
 
-    g.map_dataframe(
-        sns.violinplot,
+    g = sns.FacetGrid(df_vlms_r1, **facet_kwargs)
+
+    violin_kwargs = dict(
         x="AGENT",
         y="ANSWER",
         order=agent_order,
@@ -113,13 +130,28 @@ def run(config: PipelineConfig) -> Path:
         saturation=1,
         alpha=0.7,
     )
+    if numbered:
+        # Single uniform color (seaborn "deep" first color) — no semantic encoding.
+        # Force per-violin width so they match the visual weight of the hue-driven
+        # original (where each agent gets its own violinplot call at default width).
+        violin_kwargs["color"] = sns.color_palette("deep")[0]
+        violin_kwargs["width"] = 0.9
+        violin_kwargs["density_norm"] = "width"
+
+    g.map_dataframe(sns.violinplot, **violin_kwargs)
 
     for ax in g.axes.flat:
-        ax.set_xticks([])
-        ax.set_xlabel("")
-        ax.tick_params(bottom=False)
+        if numbered:
+            ax.set_xticks(range(len(agent_order)))
+            ax.set_xticklabels(range(1, len(agent_order) + 1), fontsize=7)
+            ax.set_xlabel("")
+            ax.tick_params(bottom=True, labelbottom=True)
+        else:
+            ax.set_xticks([])
+            ax.set_xlabel("")
+            ax.tick_params(bottom=False)
         ax.grid(True, alpha=0.3)
-        ax.set_yticks(range(1, 11)) # Set y-ticks from 1 to 10
+        ax.set_yticks(range(1, 11))
 
     plt.tight_layout()
     g.set_titles(row_template="{row_name}", col_template="Q{col_name}", fontweight="bold")
@@ -140,43 +172,33 @@ def run(config: PipelineConfig) -> Path:
             region = regs[i]
             question = q_nums[j]
 
-            lima_human = human_consensus[
-                (human_consensus["HUMAN_REGION"] == "LIMA")
-                & (human_consensus["QUESTION_NUM"] == question)
-                & (human_consensus["VIDEO_REGION"] == region)
-            ]["ANSWER"].values
+            for human_region, color in (("LIMA", "red"), ("NYC", "blue")):
+                vals = human_consensus[
+                    (human_consensus["HUMAN_REGION"] == human_region)
+                    & (human_consensus["QUESTION_NUM"] == question)
+                    & (human_consensus["VIDEO_REGION"] == region)
+                ]["ANSWER"].values
+                if len(vals):
+                    ax.axhline(vals[0], linestyle="--", linewidth=1, color=color, alpha=0.7)
 
-            nyc_human = human_consensus[
-                (human_consensus["HUMAN_REGION"] == "NYC")
-                & (human_consensus["QUESTION_NUM"] == question)
-                & (human_consensus["VIDEO_REGION"] == region)
-            ]["ANSWER"].values
-
-            if len(lima_human):
-                ax.axhline(lima_human[0], linestyle="--", linewidth=1, color="red", alpha=0.7)
-
-            if len(nyc_human):
-                ax.axhline(nyc_human[0], linestyle="--", linewidth=1, color="blue", alpha=0.7)
-
-    g.add_legend(title="Agents")
-
-    custom_lines = [
-        Line2D([0], [0], color="red", linestyle="--", label="LIMA Human Consensus"),
-        Line2D([0], [0], color="blue", linestyle="--", label="NYC Human Consensus"),
-    ]
-
-    handles, labels = g.axes[0, 0].get_legend_handles_labels()
-    handles += custom_lines
-    labels += ["LIMA Human Consensus", "NYC Human Consensus"]
-
-    g._legend.remove()
-    g.figure.legend(
-        handles,
-        labels,
-        loc="center right",
-        ncol=1,
-        title="VLMs & Consensus",
-    )
+    if not numbered:
+        consensus_lines = [
+            Line2D([0], [0], color="red", linestyle="--", label="LIMA Human Consensus"),
+            Line2D([0], [0], color="blue", linestyle="--", label="NYC Human Consensus"),
+        ]
+        consensus_labels = ["LIMA Human Consensus", "NYC Human Consensus"]
+        g.add_legend(title="Agents")
+        handles, labels = g.axes[0, 0].get_legend_handles_labels()
+        handles += consensus_lines
+        labels += consensus_labels
+        g._legend.remove()
+        g.figure.legend(
+            handles,
+            labels,
+            loc="center right",
+            ncol=1,
+            title="VLMs & Consensus",
+        )
 
     for j, col_name in enumerate(g.col_names):
         ax = g.axes[-1, j]
@@ -210,7 +232,8 @@ def run(config: PipelineConfig) -> Path:
             fontweight="bold",
         )
 
-    out_path = outdir / "bias_violin_distribution.png"
+    suffix = "_numbered" if numbered else ""
+    out_path = outdir / f"bias_violin_distribution{suffix}.png"
     save_figure(g.figure, out_path, dpi=150, bbox_inches="tight")
     plt.close(g.figure)
     return out_path
