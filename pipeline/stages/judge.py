@@ -645,6 +645,16 @@ def plot_judge(
                 columns=agents,
             )
 
+            # Pairs are deduped at construction (PAIR_KEY sorts AGENT_I/J),
+            # so the pivot only fills one triangle. Mirror across the
+            # diagonal so the heatmap is fully populated.
+            rsa_matrix = rsa_matrix.combine_first(
+                rsa_matrix.T
+            ).reindex(
+                index=agents,
+                columns=agents,
+            )
+
             sns.heatmap(
                 rsa_matrix.to_numpy(),
                 annot=False,
