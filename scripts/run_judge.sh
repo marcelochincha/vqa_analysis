@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONDA_DIR="${CONDA_DIR:-$HOME/miniconda3}"
 
 ENV_PIPELINE="${ENV_PIPELINE:-vqa-pipeline}"
@@ -15,6 +15,7 @@ MAX_TOKENS="${MAX_TOKENS:-8192}"
 CONCURRENCY="${CONCURRENCY:-16}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-10}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 log() {
   echo "[run_judge] $*"
@@ -40,6 +41,7 @@ python -m pipeline judge \
   --concurrency "${CONCURRENCY}" \
   --batch-size "${BATCH_SIZE}" \
   --checkpoint-every "${CHECKPOINT_EVERY}" \
+  --max-retries "${MAX_RETRIES}" \
   "$@"
 
 log "Done"
