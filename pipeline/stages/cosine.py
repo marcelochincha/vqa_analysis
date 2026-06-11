@@ -5,15 +5,20 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure, styled_heatmap
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
-from pipeline.utils.metrics import assign_block, get_ordered_agents, get_video_sector
+from pipeline.utils.metrics import (
+    assign_block,
+    display_agent_names,
+    get_ordered_agents,
+    get_video_sector,
+    plot_group_mean_std_grid,
+)
 
 
 def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bool = False) -> Path:
@@ -102,22 +107,31 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
                 continue
             heatmap_data = df_block.pivot(index="AGENT_I", columns="AGENT_J", values="RESULT")
             heatmap_data = heatmap_data.reindex(index=agent_order, columns=agent_order)
-            sns.heatmap(
+            styled_heatmap(
                 heatmap_data.to_numpy(),
+                ax=ax,
                 annot=False,
                 cmap=cmap,
-                xticklabels=heatmap_data.columns,
-                yticklabels=heatmap_data.index,
+                xticklabels=display_agent_names(heatmap_data.columns),
+                yticklabels=display_agent_names(heatmap_data.index),
                 vmin=-1,
                 vmax=1,
-                ax=ax,
-                square=True,
             )
             ax.set_title(f"Block {block} - {sector}", weight="bold", fontsize=16)
 
-    fig.suptitle("Cosine similarity heatmaps by block and region", fontsize=24, weight="bold")
+    embed_name = Path(embeddings_path).stem
+    fig.suptitle(f"Cosine similarity heatmaps by block and region [{embed_name}]", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "cosine_heatmap_grid.png"
     save_figure(fig, out_path, dpi=300)
     plt.close(fig)
+
+    plot_group_mean_std_grid(
+        agg_df2,
+        "RESULT",
+        f"Cosine similarity - Group Mean±Std (Human Lima vs Human NYC vs VLM) [{embed_name}]",
+        outdir / "cosine_group_meanstd_grid.png",
+        vmin=-1,
+        vmax=1,
+    )
     return out_path

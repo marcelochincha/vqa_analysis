@@ -14,10 +14,10 @@ import yaml
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure, styled_heatmap
 from pipeline.utils.checkpoint import load_dataframe, save_dataframe
 from pipeline.utils.io import load_csv
-from pipeline.utils.metrics import get_ordered_agents, get_video_sector
+from pipeline.utils.metrics import display_agent_names, get_ordered_agents, get_video_sector
 # =========================================================
 # QUESTIONS MAP
 # =========================================================
@@ -592,100 +592,253 @@ async def score_dataframe_async(
 # PLOT
 # =========================================================
 
+def _mirror_pair_matrix(matrix: pd.DataFrame, agents: list[str]) -> pd.DataFrame:
+    """Pairs are deduped at construction (PAIR_KEY sorts AGENT_I/J), so the pivot only
+    fills one triangle. Mirror across the diagonal so the heatmap is fully populated.
+
+    Self-comparisons (AGENT_I == AGENT_J) are skipped by the judge for compute reasons —
+    comparing identical text would always yield +2 (Strong Agreement). Fill the diagonal
+    with that constant so the plot reflects reality instead of NaN."""
+    mirrored = matrix.combine_first(matrix.T).reindex(index=agents, columns=agents).copy()
+    for a in agents:
+        if a in mirrored.index and a in mirrored.columns:
+            mirrored.at[a, a] = 2.0
+    return mirrored
+
+
 def plot_judge(
     rsa_df: pd.DataFrame,
     agents,
     df_answers: pd.DataFrame,
     out_path: Path,
 ) -> Path:
-
     apply_style()
 
-    nrows = 2
-    ncols = 4
+    sectors = list(df_answers["VIDEO_SECTOR"].unique()[::-1])
+    blocks = sorted(b for b in df_answers["BLOCK"].astype(int).unique() if b != 2)
+    nrows, ncols = len(sectors), len(blocks)
 
     fig, ax = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(7 * ncols, 5 * nrows),
-        sharex=True,
-        sharey=True,
+        nrows, ncols,
+        figsize=(6 * ncols, 5 * nrows),
+        sharex=True, sharey=True,
     )
+    if nrows == 1 and ncols == 1:
+        ax = np.array([[ax]])
+    elif nrows == 1:
+        ax = np.array([ax])
+    elif ncols == 1:
+        ax = np.array([[a] for a in ax])
 
-    cmap = DIVERGING_CMAP
-
-    for id_r, region in enumerate(
-        df_answers["VIDEO_SECTOR"].unique()[::-1]
-    ):
-
-        for block in df_answers[
-            "BLOCK"
-        ].astype(int).unique():
-
-            c_ax = ax[id_r, block - 1]
+    for id_r, region in enumerate(sectors):
+        for id_b, block in enumerate(blocks):
+            c_ax = ax[id_r, id_b]
 
             df_block = rsa_df[
                 (rsa_df["VIDEO_SECTOR"] == region)
-                &
-                (rsa_df["BLOCK"] == block)
+                & (rsa_df["BLOCK"] == block)
             ]
+            matrix = df_block.pivot(
+                index="AGENT_I", columns="AGENT_J", values="FINAL_SCORE"
+            ).reindex(index=agents, columns=agents)
+            matrix = _mirror_pair_matrix(matrix, agents)
 
-            rsa_matrix = df_block.pivot(
-                index="AGENT_I",
-                columns="AGENT_J",
-                values="FINAL_SCORE",
-            )
-
-            rsa_matrix = rsa_matrix.reindex(
-                index=agents,
-                columns=agents,
-            )
-
-            # Pairs are deduped at construction (PAIR_KEY sorts AGENT_I/J),
-            # so the pivot only fills one triangle. Mirror across the
-            # diagonal so the heatmap is fully populated.
-            rsa_matrix = rsa_matrix.combine_first(
-                rsa_matrix.T
-            ).reindex(
-                index=agents,
-                columns=agents,
-            )
-
-            sns.heatmap(
-                rsa_matrix.to_numpy(),
-                annot=False,
-                xticklabels=rsa_matrix.columns,
-                yticklabels=rsa_matrix.columns,
-                cmap=cmap,
+            styled_heatmap(
+                matrix.to_numpy(),
                 ax=c_ax,
-                square=True,
-                vmin=-2,
-                vmax=2,
+                annot=False,
+                xticklabels=display_agent_names(matrix.columns),
+                yticklabels=display_agent_names(matrix.index),
+                cmap=DIVERGING_CMAP,
+                vmin=-2, vmax=2,
             )
-
             c_ax.set_title(
                 f"Region: {region}, Block: {block}",
-                fontsize=16,
-                weight="bold",
+                fontsize=16, weight="bold",
+            )
+
+    fig.suptitle("LLM Judge - Scores by Agent and Block", fontsize=24, weight="bold")
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.92)
+    save_figure(fig, out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def _categorize_agent_group(agent_name: str) -> str:
+    a = str(agent_name).lower()
+    if "lima" in a:
+        return "Human_lima"
+    if "nyc" in a or "new york" in a:
+        return "Human_nyc"
+    return "Vlm"
+
+
+def plot_group_mean_std_heatmaps(
+    rsa_df: pd.DataFrame,
+    df_answers: pd.DataFrame,
+    out_path: Path,
+) -> Path:
+    """3x3 group-level (Human_lima / Human_nyc / Vlm) heatmaps annotated with mean±std,
+    faceted by region × block. Mirrors the deduped triangle before aggregating."""
+    apply_style()
+
+    df = rsa_df.copy()
+    df["GROUP_I"] = df["AGENT_I"].apply(_categorize_agent_group)
+    df["GROUP_J"] = df["AGENT_J"].apply(_categorize_agent_group)
+    # Mirror group labels too (so off-diagonal cells aggregate from both triangles).
+    df_mirrored = pd.concat(
+        [
+            df,
+            df.rename(columns={"GROUP_I": "GROUP_J", "GROUP_J": "GROUP_I"}),
+        ],
+        ignore_index=True,
+    )
+
+    group_order = ["Human_lima", "Human_nyc", "Vlm"]
+    sectors = list(df_answers["VIDEO_SECTOR"].unique()[::-1])
+    blocks = sorted(b for b in df_answers["BLOCK"].astype(int).unique() if b != 2)
+    nrows, ncols = len(sectors), len(blocks)
+
+    fig, ax = plt.subplots(
+        nrows, ncols,
+        figsize=(6 * ncols, 5 * nrows),
+        sharex=True, sharey=True,
+    )
+    if nrows == 1 and ncols == 1:
+        ax = np.array([[ax]])
+    elif nrows == 1:
+        ax = np.array([ax])
+    elif ncols == 1:
+        ax = np.array([[a] for a in ax])
+
+    for i, sector in enumerate(sectors):
+        for j, block in enumerate(blocks):
+            c_ax = ax[i, j]
+            df_filtered = df_mirrored[
+                (df_mirrored["VIDEO_SECTOR"] == sector)
+                & (df_mirrored["BLOCK"].astype(int) == int(block))
+            ]
+
+            mean_mtx = df_filtered.pivot_table(
+                index="GROUP_I", columns="GROUP_J",
+                values="FINAL_SCORE", aggfunc="mean",
+            ).reindex(index=group_order, columns=group_order)
+
+            std_mtx = df_filtered.pivot_table(
+                index="GROUP_I", columns="GROUP_J",
+                values="FINAL_SCORE", aggfunc="std",
+            ).reindex(index=group_order, columns=group_order)
+
+            annot_text = []
+            for r in range(len(mean_mtx.index)):
+                row = []
+                for col_idx in range(len(mean_mtx.columns)):
+                    m = mean_mtx.iloc[r, col_idx]
+                    s = std_mtx.iloc[r, col_idx]
+                    if pd.isna(m):
+                        row.append("-")
+                    elif pd.isna(s):
+                        row.append(f"{m:.2f}±0.00")
+                    else:
+                        row.append(f"{m:.2f}±{s:.2f}")
+                annot_text.append(row)
+
+            styled_heatmap(
+                mean_mtx.to_numpy(),
+                ax=c_ax,
+                annot=annot_text,
+                fmt="",
+                cmap=DIVERGING_CMAP,
+                center=0,
+                vmin=-2, vmax=2,
+                xticklabels=mean_mtx.columns,
+                yticklabels=mean_mtx.index,
+                annot_kws={"fontsize": 10, "weight": "bold"},
+            )
+            c_ax.set_title(
+                f"Region: {sector}, Block: {block}",
+                fontsize=14, weight="bold",
             )
 
     fig.suptitle(
-        "LLM Judge - Scores by Agent and Block",
-        fontsize=24,
-        weight="bold",
+        "LLM Judge - Group Mean±Std (Human Lima vs Human NYC vs VLM)",
+        fontsize=20, weight="bold",
     )
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.92)
+    save_figure(fig, out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def plot_stage1_status_by_block(
+    df_comp: pd.DataFrame,
+    out_path: Path,
+) -> Path:
+    """Per-block barplot of Stage 1 pass/fail counts (failed = STAGE1_SCORE != 1)."""
+    apply_style()
+
+    df = df_comp.copy()
+    df["STAGE1_STATUS"] = np.where(df["STAGE1_SCORE"] == 1, "Passed", "Not passed")
+
+    status_order = ["Passed", "Not passed"]
+    block_order = sorted(df["BLOCK"].dropna().astype(int).unique())
+
+    counts = (
+        df.groupby(["BLOCK", "STAGE1_STATUS"], as_index=False)
+        .size()
+        .rename(columns={"size": "COUNT"})
+        .assign(BLOCK=lambda d: d["BLOCK"].astype(int))
+    )
+    full_index = pd.MultiIndex.from_product(
+        [block_order, status_order], names=["BLOCK", "STAGE1_STATUS"]
+    )
+    counts = (
+        counts.set_index(["BLOCK", "STAGE1_STATUS"])
+        .reindex(full_index, fill_value=0)
+        .reset_index()
+    )
+
+    block_totals = counts.groupby("BLOCK")["COUNT"].sum().sort_index()
+    y_max = int(block_totals.max())
+
+    fig, c_ax = plt.subplots(figsize=(9, 5))
+    sns.barplot(
+        data=counts,
+        x="BLOCK", y="COUNT",
+        hue="STAGE1_STATUS",
+        hue_order=status_order,
+        palette={"Passed": "#2E8B57", "Not passed": "#C0392B"},
+        ax=c_ax,
+    )
+    c_ax.set_title("Stage 1 Outcome Counts by Block", fontsize=16, weight="bold")
+    c_ax.set_xlabel("Block")
+    c_ax.set_ylabel("Number of samples")
+    c_ax.set_ylim(0, y_max * 1.05)
+
+    for container in c_ax.containers:
+        for i, p in enumerate(container):
+            h = int(p.get_height())
+            block = block_order[i]
+            pct = (h / block_totals.loc[block]) * 100 if block_totals.loc[block] > 0 else 0
+            if h > 0:
+                c_ax.annotate(
+                    f"{h}",
+                    (p.get_x() + p.get_width() / 2.0, p.get_height()),
+                    ha="center", va="bottom", fontsize=9,
+                    xytext=(0, 3), textcoords="offset points",
+                )
+                c_ax.annotate(
+                    f"{pct:.1f}%",
+                    (p.get_x() + p.get_width() / 2.0, p.get_height() / 2.0),
+                    ha="center", va="center", fontsize=9,
+                    color="white", weight="bold",
+                )
 
     fig.tight_layout()
-
-    save_figure(
-        fig,
-        out_path,
-        dpi=300,
-        bbox_inches="tight",
-    )
-
+    save_figure(fig, out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-
     return out_path
 
 
@@ -1049,6 +1202,17 @@ def run(
         agents=get_ordered_agents(df_answers["AGENT"].unique()),
         df_answers=df_answers,
         out_path=out_path,
+    )
+
+    plot_group_mean_std_heatmaps(
+        agg_df2,
+        df_answers=df_answers,
+        out_path=outdir / f"judge_group_stats{suffix}.png",
+    )
+
+    plot_stage1_status_by_block(
+        df_comp,
+        out_path=outdir / f"judge_stage1_status{suffix}.png",
     )
 
     return out_path

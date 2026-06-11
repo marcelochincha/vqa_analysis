@@ -5,24 +5,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from pipeline.config import PipelineConfig
-from pipeline.style import DIVERGING_CMAP, apply_style, save_figure
+from pipeline.style import DIVERGING_CMAP, apply_style, save_figure, styled_heatmap
 from pipeline.utils.checkpoint import cached_dataframe
 from pipeline.utils.io import load_csv, load_embeddings_cache
-from pipeline.utils.metrics import get_ordered_agents
-
-
-def categorize_agent(agent: str) -> str:
-    agent = agent.lower()
-    if "lima" in agent:
-        return "Human_lima"
-    elif "nyc" in agent:
-        return "Human_nyc"
-    return "Vlm"
+from pipeline.utils.metrics import display_agent_names, get_ordered_agents, plot_group_mean_std_grid
 
 
 def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bool = False) -> Path:
@@ -120,22 +110,31 @@ def run(config: PipelineConfig, show_progress: bool = False, force_recompute: bo
                 continue
             rsa_matrix = df_block.pivot(index="AGENT_I", columns="AGENT_J", values="CORRELATION")
             rsa_matrix = rsa_matrix.reindex(index=agent_order, columns=agent_order)
-            sns.heatmap(
+            styled_heatmap(
                 rsa_matrix.to_numpy(),
-                annot=False,
-                xticklabels=rsa_matrix.columns,
-                yticklabels=rsa_matrix.index,
-                cmap=cmap,
                 ax=ax,
-                square=True,
+                annot=False,
+                xticklabels=display_agent_names(rsa_matrix.columns),
+                yticklabels=display_agent_names(rsa_matrix.index),
+                cmap=cmap,
                 vmin=-1,
                 vmax=1,
             )
             ax.set_title(f"Region: {region}, Block: {block}", fontsize=16, weight="bold")
 
-    fig.suptitle("RSA analysis - Representational Similarity Analysis", fontsize=24, weight="bold")
+    embed_name = Path(embeddings_path).stem
+    fig.suptitle(f"RSA analysis - Representational Similarity Analysis [{embed_name}]", fontsize=24, weight="bold")
     fig.tight_layout()
     out_path = outdir / "rsa_heatmap_grid.png"
     save_figure(fig, out_path, dpi=300)
     plt.close(fig)
+
+    plot_group_mean_std_grid(
+        rsa_df,
+        "CORRELATION",
+        f"RSA - Group Mean±Std (Human Lima vs Human NYC vs VLM) [{embed_name}]",
+        outdir / "rsa_group_meanstd_grid.png",
+        vmin=-1,
+        vmax=1,
+    )
     return out_path

@@ -11,9 +11,9 @@ from matplotlib.lines import Line2D
 from scipy.stats import ks_2samp, wasserstein_distance
 
 from pipeline.config import PipelineConfig
-from pipeline.style import apply_style, save_figure
+from pipeline.style import COLORS, apply_style, save_figure
 from pipeline.utils.io import load_csv
-from pipeline.utils.metrics import get_ordered_agents, get_video_region, to_numeric
+from pipeline.utils.metrics import display_agent_name, get_ordered_agents, get_video_region, to_numeric
 
 
 QUESTIONS = {
@@ -80,6 +80,7 @@ def run(config: PipelineConfig) -> Path:
     human_consensus = build_human_consensus(df_b2)
     df_vlms = df_b2[~df_b2["AGENT"].str.contains("human", case=False, na=False)].copy()
     df_vlms_r1 = df_vlms[df_vlms["REPETITION"] == 1].copy()
+    vlm_consensus = df_vlms_r1.groupby(["QUESTION_NUM", "VIDEO_REGION"], as_index=False)["ANSWER"].mean()
 
     stats_df = compute_stats(df_vlms_r1)
     wasserstein_avg = stats_df.groupby("QUESTION_NUM")["WASSERSTEIN_DISTANCE"].mean().reset_index()
@@ -87,17 +88,29 @@ def run(config: PipelineConfig) -> Path:
     agent_order = get_ordered_agents(df_vlms_r1["AGENT"].unique())
 
     # Persist the numeric ordering so the numbered variant is interpretable.
-    order_df = pd.DataFrame({"NUMBER": range(1, len(agent_order) + 1), "AGENT": agent_order})
+    order_df = pd.DataFrame({
+        "NUMBER": range(1, len(agent_order) + 1),
+        "AGENT": agent_order,
+        "DISPLAY": [display_agent_name(a) for a in agent_order],
+    })
     order_df.to_csv(outdir / "bias_agent_order.csv", index=False)
 
-    out_path = _render(df_vlms_r1, human_consensus, agent_order, wasserstein_avg, outdir, numbered=False)
-    _render(df_vlms_r1, human_consensus, agent_order, wasserstein_avg, outdir, numbered=True)
+    out_path = _render(df_vlms_r1, human_consensus, vlm_consensus, agent_order, wasserstein_avg, outdir, numbered=False)
+    _render(df_vlms_r1, human_consensus, vlm_consensus, agent_order, wasserstein_avg, outdir, numbered=True)
     return out_path
+
+
+def int_rgb_to_tuple(rgb_int: int) -> tuple:
+    r = (rgb_int >> 16) & 0xFF
+    g = (rgb_int >> 8) & 0xFF
+    b = rgb_int & 0xFF
+    return (r / 255, g / 255, b / 255)
 
 
 def _render(
     df_vlms_r1: pd.DataFrame,
     human_consensus: pd.DataFrame,
+    vlm_consensus: pd.DataFrame,
     agent_order: list,
     wasserstein_avg: pd.DataFrame,
     outdir: Path,
@@ -128,13 +141,13 @@ def _render(
         legend=False,
         edgecolor="gray",
         saturation=1,
-        alpha=0.7,
+        alpha=0.4,
     )
     if numbered:
         # Single uniform color (seaborn "deep" first color) — no semantic encoding.
         # Force per-violin width so they match the visual weight of the hue-driven
         # original (where each agent gets its own violinplot call at default width).
-        violin_kwargs["color"] = sns.color_palette("deep")[0]
+        violin_kwargs["color"] = int_rgb_to_tuple(0x54CFB0) #A8E4D3  #(0.5,0.5,0.5) #sns.color_palette("deep")[0]
         violin_kwargs["width"] = 0.9
         violin_kwargs["density_norm"] = "width"
 
@@ -150,7 +163,7 @@ def _render(
             ax.set_xticks([])
             ax.set_xlabel("")
             ax.tick_params(bottom=False)
-        ax.grid(True, alpha=0.3)
+        #ax.grid(False, alpha=0.3)
         ax.set_yticks(range(1, 11))
 
     plt.tight_layout()
@@ -172,23 +185,31 @@ def _render(
             region = regs[i]
             question = q_nums[j]
 
-            for human_region, color in (("LIMA", "red"), ("NYC", "blue")):
+            for human_region, color in (("LIMA", COLORS["human_lima"]), ("NYC", COLORS["human_nyc"])):
                 vals = human_consensus[
                     (human_consensus["HUMAN_REGION"] == human_region)
                     & (human_consensus["QUESTION_NUM"] == question)
                     & (human_consensus["VIDEO_REGION"] == region)
                 ]["ANSWER"].values
                 if len(vals):
-                    ax.axhline(vals[0], linestyle="--", linewidth=1, color=color, alpha=0.7)
+                    ax.axhline(vals[0], linestyle="--", linewidth=2, color=color, alpha=0.9)
+            vlm_vals = vlm_consensus[
+                (vlm_consensus["QUESTION_NUM"] == question)
+                & (vlm_consensus["VIDEO_REGION"] == region)
+            ]["ANSWER"].values
+            if len(vlm_vals):
+                ax.axhline(vlm_vals[0], linestyle="--", linewidth=2, color=COLORS["vlm"], alpha=0.9)
 
     if not numbered:
         consensus_lines = [
-            Line2D([0], [0], color="red", linestyle="--", label="LIMA Human Consensus"),
-            Line2D([0], [0], color="blue", linestyle="--", label="NYC Human Consensus"),
+            Line2D([0], [0], color=COLORS["human_lima"], linestyle="--",linewidth=2, label="LIMA Human Consensus"),
+            Line2D([0], [0], color=COLORS["human_nyc"], linestyle="--",linewidth=2, label="NYC Human Consensus"),
+            Line2D([0], [0], color=COLORS["vlm"], linestyle="--", linewidth=2, label="VLM Mean"),
         ]
-        consensus_labels = ["LIMA Human Consensus", "NYC Human Consensus"]
+        consensus_labels = ["LIMA Human Consensus", "NYC Human Consensus", "VLM Mean"]
         g.add_legend(title="Agents")
         handles, labels = g.axes[0, 0].get_legend_handles_labels()
+        labels = [display_agent_name(l) for l in labels]
         handles += consensus_lines
         labels += consensus_labels
         g._legend.remove()
