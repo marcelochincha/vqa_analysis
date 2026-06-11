@@ -229,3 +229,6 @@ unused/
 *.pkl
 
 *.mp4
+
+exports/
+OLD/
