@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pickle
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -9,8 +12,110 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 
 
+# Reserved (non-tuple) key under which run metadata is stored inside the cache
+# dict. All real entries are 4-tuples, so this string key never collides and is
+# transparent to consumers that look up embeddings by key.
+META_KEY = "__meta__"
+
+
 def build_key(agent: str, video: str, question_num: int, repetition: int) -> tuple:
 	return (str(agent), str(video), int(question_num), int(repetition))
+
+
+def _git_commit() -> str | None:
+	try:
+		root = Path(__file__).resolve().parents[1]
+		out = subprocess.run(
+			["git", "rev-parse", "HEAD"],
+			cwd=root,
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		return out.stdout.strip() or None
+	except Exception:
+		return None
+
+
+def _library_versions() -> dict:
+	versions: dict = {}
+	import platform
+
+	versions["python"] = platform.python_version()
+	for mod in ("torch", "transformers", "sentence_transformers"):
+		try:
+			versions[mod] = __import__(mod).__version__
+		except Exception:
+			versions[mod] = None
+	return versions
+
+
+def resolve_model_meta(model: SentenceTransformer) -> dict:
+	"""Capture ground-truth properties from the *loaded* model.
+
+	This is the whole point of the metadata: record what actually happened
+	(real dtype, real attention implementation, real dim) rather than what a
+	filename or CLI flag claims.
+	"""
+	meta: dict = {}
+	try:
+		auto = model[0].auto_model
+		meta["resolved_dtype"] = str(getattr(auto, "dtype", None))
+		meta["resolved_attn_implementation"] = getattr(
+			auto.config, "_attn_implementation", None
+		)
+	except Exception as exc:  # pragma: no cover - defensive
+		meta["resolve_error"] = repr(exc)
+	try:
+		meta["embedding_dim"] = int(model.get_sentence_embedding_dimension())
+	except Exception:
+		pass
+	try:
+		meta["max_seq_length"] = int(model.max_seq_length)
+	except Exception:
+		pass
+	return meta
+
+
+def build_metadata(
+	args: argparse.Namespace,
+	data_path: Path,
+	n_entries: int,
+	model_meta: dict | None,
+	prior_meta: dict | None,
+) -> dict:
+	# Start from prior metadata so ground-truth model fields survive a
+	# fully-cached resume run (where the model is never loaded).
+	meta: dict = dict(prior_meta) if isinstance(prior_meta, dict) else {}
+	meta.update(
+		{
+			"model": args.model,
+			"batch_size": args.batch_size,
+			"text_col": args.text_col,
+			"normalize": bool(args.normalize),
+			"instruction": args.instruction,
+			"requested_padding_side": args.padding_side,
+			"requested_dtype": args.dtype,
+			"requested_max_seq_length": args.max_seq_length,
+			"device": args.device,
+			"data": str(data_path),
+			"n_entries": n_entries,
+			"last_run_utc": datetime.now(timezone.utc).isoformat(),
+			"git_commit": _git_commit(),
+			"versions": _library_versions(),
+		}
+	)
+	if model_meta:
+		meta.update(model_meta)
+	return meta
+
+
+def save_meta_sidecar(meta: dict, cache_path: Path) -> Path:
+	sidecar = cache_path.with_suffix(cache_path.suffix + ".meta.json")
+	sidecar.parent.mkdir(parents=True, exist_ok=True)
+	with sidecar.open("w", encoding="utf-8") as handle:
+		json.dump(meta, handle, indent=2, sort_keys=True)
+	return sidecar
 
 
 # Short slugs used to derive a default cache filename from --model.
@@ -46,7 +151,7 @@ def save_cache(cache: dict, path: Path) -> None:
 		pickle.dump(cache, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def save_npz(keys: list[tuple], cache: dict, path: Path) -> None:
+def save_npz(keys: list[tuple], cache: dict, path: Path, meta: dict | None = None) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	agents = np.array([k[0] for k in keys], dtype=str)
 	videos = np.array([k[1] for k in keys], dtype=str)
@@ -60,6 +165,7 @@ def save_npz(keys: list[tuple], cache: dict, path: Path) -> None:
 		question_num=qnums,
 		repetition=reps,
 		embedding=embeddings,
+		meta_json=np.array(json.dumps(meta or {})),
 	)
 
 
@@ -151,7 +257,9 @@ def main() -> int:
 	keys = [build_key(a, v, q, r) for a, v, q, r in zip(agents, videos, qnums, reps)]
 
 	cache = load_cache(output_path) if args.resume else {}
+	prior_meta = cache.pop(META_KEY, None)
 	missing_indices = [i for i, k in enumerate(keys) if k not in cache]
+	model_meta: dict | None = None
 
 	print(f"Total rows: {len(keys):,}")
 	print(f"Cached: {len(keys) - len(missing_indices):,}")
@@ -198,6 +306,19 @@ def main() -> int:
 			model.max_seq_length = args.max_seq_length
 			print(f"  max_seq_length={args.max_seq_length}")
 
+		# Ground truth from the actually-loaded model, so the cache can never
+		# misreport its real dtype / attention impl the way a filename can.
+		model_meta = resolve_model_meta(model)
+		model_meta["trust_remote_code"] = trust_remote_code
+		model_meta["resolved_padding_side"] = padding_side
+		print(
+			"  resolved: dtype={} attn={} dim={}".format(
+				model_meta.get("resolved_dtype"),
+				model_meta.get("resolved_attn_implementation"),
+				model_meta.get("embedding_dim"),
+			)
+		)
+
 		encode_kwargs: dict = {
 			"batch_size": args.batch_size,
 			"show_progress_bar": True,
@@ -221,11 +342,18 @@ def main() -> int:
 				save_cache(cache, output_path)
 				print(f"Checkpoint saved: {processed:,}/{total:,} new embeddings")
 
+	n_entries = len(cache)  # tuple entries only; META_KEY was popped on load
+	meta = build_metadata(args, data_path, n_entries, model_meta, prior_meta)
+	cache[META_KEY] = meta
+
 	save_cache(cache, output_path)
-	print(f"Saved cache: {output_path} ({len(cache):,} entries)")
+	print(f"Saved cache: {output_path} ({n_entries:,} entries)")
+
+	sidecar = save_meta_sidecar(meta, output_path)
+	print(f"Saved metadata: {sidecar}")
 
 	if args.npz:
-		save_npz(keys, cache, args.npz)
+		save_npz(keys, cache, args.npz, meta)
 		print(f"Saved npz: {args.npz}")
 
 	return 0
