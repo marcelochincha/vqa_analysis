@@ -10,7 +10,14 @@ import pandas as pd
 STAGE_CACHE_FILES: dict[str, list[str]] = {
     "cosine": ["cosine_similarity_data.parquet"],
     "rsa": ["rsa_correlations.parquet"],
-    "embed": ["pca_coords.parquet"],
+    "embed": [
+        "pca_global_coords.parquet",
+        "pca_perblock_coords.parquet",
+        "tsne_global_coords.parquet",
+        "tsne_perblock_coords.parquet",
+        "umap_global_coords.parquet",
+        "umap_perblock_coords.parquet",
+    ],
     "judge": [
         "llm_agreement_scores.parquet",
         "llm_agreement_scores.parquet.tmp",
