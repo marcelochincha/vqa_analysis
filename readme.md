@@ -28,6 +28,8 @@ All operational tasks are wrapped in bash scripts you can drive entirely with en
 | 3 | [`scripts/bash.sh`](scripts/bash.sh) | Start the vLLM server that the `judge` stage talks to. **Runs in its own terminal.** |
 | 4 | [`scripts/run_judge.sh`](scripts/run_judge.sh) | Run *only* the `judge` stage (handy when vLLM goes up after the other stages, or when iterating on judge params). |
 | 5 | [`scripts/package_cache.sh`](scripts/package_cache.sh) | Bundle full `data/`, `external_embeds/`, and `outputs/` (plots, parquets, CSVs) into a tarball — recipient extracts and has a fully reproducible state. |
+| 6 | [`scripts/run_multi_embed.sh`](scripts/run_multi_embed.sh) | Re-run `embed` / `cosine` / `rsa` for **every pre-computed embedding variant** and `bias` / `judge` once, writing each to its own `outputs/pipeline_<slug>/` dir. Skips preprocess. |
+| 7 | [`scripts/export_figures.sh`](scripts/export_figures.sh) | Zip all SVG (and optionally PDF) figures from `outputs/` (excluding `olds/`) — one zip per pipeline variant by default, for easy sharing. |
 
 Each script reads env vars with sane defaults. Override per invocation with `VAR=value bash script.sh`.
 
@@ -159,6 +161,75 @@ Bundles the full `data/`, `external_embeds/`, and `outputs/` directories (raw so
 bash scripts/package_cache.sh                       # default path: ./robusto_cache_<timestamp>.tar.gz
 bash scripts/package_cache.sh /tmp/cache.tar.gz     # custom path
 ```
+
+### 6. Multi-embed pipeline — `bash scripts/run_multi_embed.sh`
+
+Re-runs the embed-dependent stages (`embed`, `cosine`, `rsa`) for every pre-computed embedding variant, and the non-embed stages (`bias`, `judge`) once. Preprocess is intentionally skipped — assumes `data/r2_cleaned.csv` already exists.
+
+Output layout:
+
+```
+outputs/
+├── pipeline_allmpnet_batch1/     ← embed / cosine / rsa
+├── pipeline_allmpnet_batch32/    ← embed / cosine / rsa
+├── pipeline_qwen3emb4b_batch1/   ← embed / cosine / rsa
+└── pipeline_non_embed/           ← bias (+ judge if checkpoint or RUN_JUDGE=true)
+```
+
+```bash
+# Full run across all variants
+bash scripts/run_multi_embed.sh
+
+# Only specific embed variants
+EMBED_SLUGS="allmpnet_batch1 qwen3emb4b_batch1" bash scripts/run_multi_embed.sh
+
+# Skip bias/judge (re-run embed stages only)
+SKIP_NON_EMBED=true bash scripts/run_multi_embed.sh
+
+# Include judge from scratch (vLLM must be running — see bash scripts/bash.sh)
+RUN_JUDGE=true bash scripts/run_multi_embed.sh
+```
+
+Judge behavior:
+- If `outputs/pipeline_non_embed/judge/llm_agreement_scores.parquet` **exists** → runs automatically from the checkpoint, no vLLM needed (0 pending rows = 0 LLM calls, re-plots only).
+- If checkpoint **does not exist** and `RUN_JUDGE=true` → full run, vLLM must be up.
+- If checkpoint **does not exist** and `RUN_JUDGE=false` (default) → skipped.
+
+| Env var | Default | Effect |
+|---|---|---|
+| `EMBED_SLUGS` | `allmpnet_batch1 allmpnet_batch32 qwen3emb4b_batch1` | Which variants to process |
+| `SKIP_NON_EMBED` | `false` | Skip bias and judge |
+| `RUN_JUDGE` | `false` | Run judge when no checkpoint exists |
+| `PIPELINE_PROGRESS` | `false` | Pass `--progress` to the pipeline |
+| `DATA_PATH` | `data/r2_cleaned.csv` | Input CSV |
+| `VENV_DIR` | `<repo>/venv` | Path to the Python venv |
+| `JUDGE_MODEL` | `Qwen/Qwen3-4B` | LLM model for judge |
+| `JUDGE_BASE_URL` | `http://localhost:8000/v1` | vLLM endpoint |
+| `JUDGE_CONCURRENCY` | `16` | Async requests in flight |
+| `JUDGE_BATCH_SIZE` | `128` | Rows per batch |
+
+### 7. Export figures — `bash scripts/export_figures.sh`
+
+Zips all SVG figures from `outputs/` (excluding `olds/`) for sharing. By default creates one zip per pipeline variant so each file stays under typical upload limits.
+
+```bash
+bash scripts/export_figures.sh
+# → figures_pipeline_allmpnet_batch1_<ts>.zip
+# → figures_pipeline_allmpnet_batch32_<ts>.zip
+# → figures_pipeline_qwen3emb4b_batch1_<ts>.zip
+# → figures_pipeline_non_embed_<ts>.zip
+
+# Single zip at a custom path
+SPLIT=false bash scripts/export_figures.sh /tmp/figures.zip
+
+# Include PDFs as well
+FORMATS="svg pdf" bash scripts/export_figures.sh
+```
+
+| Env var | Default | Effect |
+|---|---|---|
+| `FORMATS` | `svg` | Space-separated extensions to include (`svg`, `pdf`, or both) |
+| `SPLIT` | `true` | One zip per `pipeline_*` subdir; `false` = single zip |
 
 ---
 
