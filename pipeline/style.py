@@ -58,12 +58,12 @@ def build_agent_markers(agents) -> dict:
 
 # Shared colormap for every heatmap stage (mako: dark teal -> light yellow).
 # Single source of truth so cosine / rsa / judge stay visually consistent.
-DIVERGING_CMAP =  sns.cubehelix_palette(start=0, rot=0.2,reverse=False,as_cmap=True) #sns.color_palette("inferno", as_cmap=True)  #sns.color_palette("Greys",as_cmap=True) ##sns.cubehelix_palette(as_cmap=True) #.color_palette("rocket_r", as_cmap=True)
+DIVERGING_CMAP =  sns.cubehelix_palette(start=0, rot=0.4,reverse=False,as_cmap=True) #sns.color_palette("inferno", as_cmap=True)  #sns.color_palette("Greys",as_cmap=True) ##sns.cubehelix_palette(as_cmap=True) #.color_palette("rocket_r", as_cmap=True)
 
 
 # Fallback inner-grid style (used only when blending is disabled), shared by every
 # heatmap so the white separator lines render consistently across PNG and SVG/PDF.
-HEATMAP_LINEWIDTHS = 0.5
+HEATMAP_LINEWIDTHS = 0.05
 HEATMAP_LINECOLOR = "white"
 
 

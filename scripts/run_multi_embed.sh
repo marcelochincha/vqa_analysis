@@ -33,7 +33,7 @@ PIPELINE_PROGRESS="${PIPELINE_PROGRESS:-false}"
 # Which embed slugs to process. Override to restrict to a subset.
 EMBED_SLUGS="${EMBED_SLUGS:-allmpnet_batch1 allmpnet_batch32 qwen3emb4b_batch1}"
 
-SKIP_NON_EMBED="${SKIP_NON_EMBED:-false}"
+SKIP_NON_EMBED="${SKIP_NON_EMBED:-true}"
 RUN_JUDGE="${RUN_JUDGE:-false}"
 
 # Judge settings (only used when RUN_JUDGE=true)

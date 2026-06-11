@@ -8,7 +8,7 @@ from pathlib import Path
 # Single source of truth for the "blender box" drawn by pipeline.style.styled_heatmap
 # on every heatmap. The band replaces the fixed white separator lines and renders
 # identically in PNG and SVG/PDF.
-HEATMAP_BLEND_ENABLED = True   # set False to fall back to fixed white grid lines
+HEATMAP_BLEND_ENABLED = False   # set False to fall back to fixed white grid lines
 HEATMAP_BLEND_WIDTH = 0.05     # band width as a fraction of one cell
 HEATMAP_BLEND_RES = 24         # raster px per cell for the overlay (higher = smoother)
 HEATMAP_BLEND_ALPHA = 0.8      # overlay opacity
