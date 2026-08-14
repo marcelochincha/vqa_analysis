@@ -232,3 +232,11 @@ unused/
 
 exports/
 OLD/
+# Rebuttal write-ups & manuscript (kept local, NOT committed).
+# NOTE: execution docs such as rebuttal/stats/README.md ARE tracked (only top-level rebuttal/*.md is ignored).
+rebuttal/*.md
+rebuttal/*.docx
+rebuttal/*.xlsx
+rebuttal/*.bak
+rebuttal/*.tex
+rebuttal/md_to_docx.py
